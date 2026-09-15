@@ -1,0 +1,98 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { EntitySchema, In, MoreThan, QueryFailedError } = require('typeorm');
+const { ArcadeDataSource } = require('../dist');
+
+const Person = new EntitySchema({
+  name: 'Person',
+  tableName: 'test_person',
+  columns: {
+    id: { type: 'uuid', primary: true, generated: 'uuid' },
+    name: { type: String },
+    age: { type: Number },
+    active: { type: Boolean },
+  },
+});
+
+const options = {
+  url: process.env.ARCADEDB_URL ?? 'http://127.0.0.1:2480',
+  database: process.env.ARCADEDB_DATABASE ?? 'driver_test',
+  username: process.env.ARCADEDB_USERNAME ?? 'root',
+  password: process.env.ARCADEDB_PASSWORD ?? 'integration-password',
+  entities: [Person],
+  synchronize: true,
+};
+
+test('repository CRUD uses ArcadeDB and preserves TypeORM results', async (t) => {
+  const source = await new ArcadeDataSource(options).initialize();
+  t.after(() => source.destroy());
+  const repo = source.getRepository(Person);
+  await repo.clear();
+
+  const person = await repo.save({ name: "O'Reilly :name ?", age: 30, active: true });
+  assert.match(person.id, /^[\da-f-]{36}$/);
+  assert.deepEqual(await repo.findOneByOrFail({ id: person.id }), person);
+  assert.equal(await repo.count(), 1);
+  person.age = 31;
+  await repo.save(person);
+  assert.equal((await repo.findOneByOrFail({ id: person.id })).age, 31);
+
+  const inserted = await repo.insert({ name: 'Bob', age: 21, active: false });
+  assert.equal(inserted.identifiers.length, 1);
+  const updated = await repo.update({ id: person.id }, { age: 32 });
+  assert.equal(updated.affected, 1);
+  assert.equal((await repo.delete({ id: person.id })).affected, 1);
+  assert.equal((await repo.delete({ id: person.id })).affected, 0);
+  const bob = await repo.findOneByOrFail({ id: inserted.identifiers[0].id });
+  assert.equal(bob.active, false);
+  await repo.remove(bob);
+  assert.equal(await repo.count(), 0);
+});
+
+test('find operators, query builder, pagination and raw bound SQL', async (t) => {
+  const source = await new ArcadeDataSource(options).initialize();
+  t.after(() => source.destroy());
+  const repo = source.getRepository(Person);
+  await repo.clear();
+  await repo.save([
+    { name: 'Alice', age: 40, active: true },
+    { name: 'Bob', age: 20, active: false },
+    { name: 'Carol', age: 30, active: true },
+  ]);
+  assert.equal((await repo.findBy({ name: In(['Alice', 'Carol']), age: MoreThan(25) })).length, 2);
+  const [page, count] = await repo.findAndCount({ order: { age: 'ASC' }, skip: 1, take: 1 });
+  assert.equal(count, 3);
+  assert.equal(page[0].name, 'Carol');
+  const people = await repo.createQueryBuilder('p').where('p.age > :age', { age: 25 }).orderBy('p.age', 'DESC').getMany();
+  assert.deepEqual(people.map(p => p.name), ['Alice', 'Carol']);
+  const rows = await source.query('SELECT name FROM test_person WHERE name = :p0', ['Alice']);
+  assert.equal(rows[0].name, 'Alice');
+  assert.equal((await source.query('SELECT name FROM test_person WHERE name = :name', { name: 'Bob' }))[0].name, 'Bob');
+  assert.equal((await source.sql`SELECT name FROM test_person WHERE name = ${'Carol'}`)[0].name, 'Carol');
+  await assert.rejects(source.query('SELECT FROM definitely_missing_type'), QueryFailedError);
+});
+
+test('transaction commit, rollback, session isolation and runner release', async (t) => {
+  const source = await new ArcadeDataSource(options).initialize();
+  t.after(() => source.destroy());
+  const repo = source.getRepository(Person);
+  await repo.clear();
+  await source.transaction(async manager => {
+    await manager.save(Person, { name: 'Committed', age: 1, active: true });
+  });
+  await assert.rejects(source.transaction(async manager => {
+    await manager.save(Person, { name: 'Rolled back', age: 2, active: true });
+    throw new Error('rollback me');
+  }), /rollback me/);
+  assert.equal(await repo.count(), 1);
+  const runner = source.createQueryRunner();
+  await runner.startTransaction('REPEATABLE READ');
+  await runner.manager.save(Person, { name: 'Uncommitted', age: 3, active: true });
+  assert.equal(await runner.manager.count(Person), 2);
+  assert.equal(await repo.count(), 1);
+  await assert.rejects(runner.startTransaction(), /nested/i);
+  await runner.release();
+  assert.equal(await repo.count(), 1);
+  await assert.rejects(runner.query('SELECT 1'), /released/i);
+  await assert.rejects(source.transaction('SERIALIZABLE', async () => {}), /isolation/i);
+});
