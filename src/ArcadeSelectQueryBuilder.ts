@@ -20,6 +20,8 @@ import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBui
 function withArcadeSwitches<T extends new (...args: any[]) => QueryBuilder<any>>(Base: T): T {
   return class extends Base {
     getQuery(): string {
+      if (this.expressionMap.queryType !== 'select' && this.expressionMap.maxExecutionTime > 0)
+        throw new Error('ArcadeDB maxExecutionTime is supported only for select queries');
       return Reflect.apply(Base.prototype.getQuery, this, []);
     }
     protected createWhereConditionExpression(
@@ -166,6 +168,31 @@ function projectReturnedRows(builder: QueryBuilder<any>, rows: ObjectLiteral[]):
 export class ArcadeSelectQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   SelectQueryBuilder,
 )<Entity> {
+  override maxExecutionTime(milliseconds: number): this {
+    if (!Number.isSafeInteger(milliseconds) || milliseconds < 0)
+      throw new Error('maxExecutionTime must be a non-negative safe integer');
+    return super.maxExecutionTime(milliseconds);
+  }
+
+  override getQueryAndParameters(): [string, any[]] {
+    const [sql, parameters] = super.getQueryAndParameters();
+    const timeout = this.expressionMap.maxExecutionTime;
+    // 26.9.1's HTTP endpoint appends LIMIT after a top-level TIMEOUT. An outer
+    // SELECT leaves that limit valid while the inner executor enforces the deadline.
+    return [timeout > 0 ? `SELECT FROM (${sql} TIMEOUT ${timeout} EXCEPTION)` : sql, parameters];
+  }
+
+  protected override async executeExistsQuery(queryRunner: QueryRunner): Promise<boolean> {
+    const results = await new ArcadeSelectQueryBuilder(this.dataSource, queryRunner)
+      .fromDummy()
+      .select('1', 'row_exists')
+      .whereExists(this)
+      .limit(1)
+      .maxExecutionTime(this.expressionMap.maxExecutionTime)
+      .getRawMany();
+    return results.length > 0;
+  }
+
   override timeTravelQuery(_timeTravelFn?: string | boolean): this {
     throw new Error('Time travel queries are not supported by ArcadeDB');
   }
@@ -176,7 +203,6 @@ export class ArcadeSelectQueryBuilder<Entity extends ObjectLiteral> extends with
       map.cache ||
       map.useIndex?.length ||
       map.timeTravel ||
-      map.maxExecutionTime > 0 ||
       (map.lockMode && map.lockMode !== 'optimistic') ||
       map.onLocked ||
       map.commonTableExpressions.length

@@ -741,3 +741,50 @@ test('array find operators preserve empty-array, null-element and negation seman
     2,
   );
 });
+
+test('server execution deadlines work with pagination, aggregates, existence and real timeout errors', async (t) => {
+  const Item = new EntitySchema({
+    name: 'Deadline',
+    tableName: 'test_deadline',
+    columns: { id: { type: String, primary: true }, value: { type: Number } },
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Item] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Item);
+  await repo.clear();
+  await repo.insert([
+    { id: 'a', value: 1 },
+    { id: 'b', value: 2 },
+  ]);
+  const qb = repo.createQueryBuilder('d').maxExecutionTime(1000);
+  assert.deepEqual(
+    (await qb.clone().orderBy('d.id').skip(1).take(1).getMany()).map((row) => row.id),
+    ['b'],
+  );
+  assert.equal(await qb.clone().getCount(), 2);
+  assert.equal(await qb.clone().where({ id: 'a' }).getExists(), true);
+  assert.equal(await qb.clone().where({ id: 'missing' }).getExists(), false);
+  assert.deepEqual(
+    await qb
+      .clone()
+      .select('SUM(d.value)', 'total')
+      .having('SUM(d.value) > :min', { min: 1 })
+      .getRawMany(),
+    [{ total: 3 }],
+  );
+  await db.query('INSERT INTO test_deadline CONTENT :rows', {
+    rows: Array.from({ length: 10000 }, (_, i) => ({ id: 'slow-' + i, value: i })),
+  });
+  await assert.rejects(
+    repo
+      .createQueryBuilder('d')
+      .select('d.id')
+      .orderBy('d.value', 'DESC')
+      .maxExecutionTime(1)
+      .getRawMany(),
+    (error) =>
+      error instanceof QueryFailedError &&
+      /timeout/i.test(error.driverError?.exception ?? error.message),
+  );
+  assert.equal(await repo.count(), 10002);
+});

@@ -13,7 +13,6 @@ test('unsupported query options reject instead of silently changing semantics', 
     cache: () => select().cache(true),
     indexHint: () => select().useIndex('idx_account'),
     timeTravel: () => select().timeTravelQuery('yesterday'),
-    executionHint: () => select().maxExecutionTime(100),
     dirtyRead: () => select().setLock('dirty_read'),
     cte: () => select().addCommonTableExpression('SELECT 1', 'numbers'),
     ignoreConflicts: () =>
@@ -362,4 +361,19 @@ test('array find operators bind values and reject unsupported shapes before requ
             .getQueryAndParameters(),
         /array|undefined/i,
       );
+});
+
+test('server execution limits validate and survive clones without becoming ignored write hints', () => {
+  const db = new ArcadeDataSource(options);
+  const qb = db.createQueryBuilder().select('id').from('documents', 'd');
+  for (const value of [-1, 0.5, Infinity, NaN, '10'])
+    assert.throws(() => qb.maxExecutionTime(value), /integer/i);
+  const [sql] = qb.maxExecutionTime(100).clone().getQueryAndParameters();
+  assert.match(sql, /^SELECT FROM \(SELECT/);
+  assert.match(sql, /TIMEOUT 100 EXCEPTION\)$/);
+  assert.doesNotMatch(qb.maxExecutionTime(0).getQueryAndParameters()[0], /TIMEOUT/);
+  assert.throws(
+    () => qb.maxExecutionTime(10).update('documents').set({ id: 'x' }).getQueryAndParameters(),
+    /select/i,
+  );
 });
