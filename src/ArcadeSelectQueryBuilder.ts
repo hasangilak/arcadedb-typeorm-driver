@@ -9,6 +9,7 @@ import {
   type QueryRunner,
 } from 'typeorm';
 
+import type { WhereClauseCondition } from 'typeorm/query-builder/WhereClause';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { randomUUID } from 'node:crypto';
 import type { ArcadeDriver } from './ArcadeDriver';
@@ -21,6 +22,48 @@ function withArcadeSwitches<T extends new (...args: any[]) => QueryBuilder<any>>
     getQuery(): string {
       return Reflect.apply(Base.prototype.getQuery, this, []);
     }
+    protected createWhereConditionExpression(
+      condition: WhereClauseCondition,
+      alwaysWrap = false,
+    ): string {
+      if (
+        typeof condition === 'object' &&
+        !Array.isArray(condition) &&
+        'parameters' in condition &&
+        ['arrayContains', 'arrayContainedBy', 'arrayOverlap', 'any'].includes(condition.operator)
+      ) {
+        const [left, right] = condition.parameters;
+        const value: unknown = this.getParameters()[right.slice(1)];
+        if (value === null) return 'null IN [true]';
+        if (
+          !Array.isArray(value) ||
+          value.some(
+            (item) => item !== null && !['string', 'number', 'boolean'].includes(typeof item),
+          )
+        )
+          throw new Error('ArcadeDB array operators require an array of scalar values or nulls');
+        if (condition.operator === 'any') return `${left} IN ${right}`;
+        let predicate: string;
+        if (condition.operator === 'arrayContains') {
+          predicate = value.includes(null) ? 'false' : `${left} CONTAINSALL ${right}`;
+        } else if (condition.operator === 'arrayContainedBy') {
+          predicate = `NOT(${left} CONTAINS null) AND (${right} CONTAINSALL ${left})`;
+        } else {
+          const filtered = value.includes(null)
+            ? this.createParameter(value.filter((item) => item !== null))
+            : right;
+          predicate = `${left} CONTAINSANY ${filtered}`;
+        }
+        // Native collection predicates return false for null. IN preserves SQL UNKNOWN
+        // through NOT/AND/OR on 26.9.1, unlike comparing a nullable boolean to true.
+        return `if((${left} IS NULL), null, (${predicate})) IN [true]`;
+      }
+      return Reflect.apply(Base.prototype.createWhereConditionExpression, this, [
+        condition,
+        alwaysWrap,
+      ]);
+    }
+
     select(...args: any[]): any {
       return arcadeBuilder(Reflect.apply(Base.prototype.select, this, args));
     }

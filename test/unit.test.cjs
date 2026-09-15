@@ -334,3 +334,32 @@ test('returning rejects unsupported expressions and counts returned records inde
   assert.equal(counted.affected, 99);
   await runner.release();
 });
+
+test('array find operators bind values and reject unsupported shapes before requests', async (t) => {
+  const { EntitySchema, ArrayContains, ArrayOverlap, Any } = require('typeorm');
+  t.mock.method(global, 'fetch', async () => Response.json({ result: true }));
+  const schema = new EntitySchema({
+    name: 'Arrays',
+    columns: { id: { type: String, primary: true }, tags: { type: 'array', nullable: true } },
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [schema] }).initialize();
+  t.after(() => db.destroy());
+  const sql = db
+    .getRepository(schema)
+    .createQueryBuilder('a')
+    .where({ tags: ArrayContains(["x' OR 1=1"]) })
+    .getQueryAndParameters();
+  assert.ok(!sql[0].includes("x' OR 1=1"));
+  assert.ok(sql[1].some((value) => Array.isArray(value) && value[0] === "x' OR 1=1"));
+  for (const value of [[{}], [['nested']], undefined, 'not-an-array'])
+    for (const operator of [ArrayContains, ArrayOverlap, Any])
+      assert.throws(
+        () =>
+          db
+            .getRepository(schema)
+            .createQueryBuilder()
+            .where({ tags: operator(value) })
+            .getQueryAndParameters(),
+        /array|undefined/i,
+      );
+});

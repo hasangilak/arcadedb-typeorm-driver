@@ -663,3 +663,81 @@ test('named upsert constraints resolve declared and installed unique keys', asyn
   }
   assert.equal((await repo.findOneByOrFail({ id: 'first' })).value, 3);
 });
+
+test('array find operators preserve empty-array, null-element and negation semantics', async (t) => {
+  const { ArrayContains, ArrayContainedBy, ArrayOverlap, Any, Not, And, Or } = require('typeorm');
+  const Item = new EntitySchema({
+    name: 'ArrayPredicates',
+    tableName: 'test_array_predicates',
+    columns: {
+      id: { type: String, primary: true },
+      tags: { type: 'array', nullable: true },
+    },
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Item] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Item);
+  await repo.clear();
+  await repo.insert([
+    { id: 'a', tags: ['a', 'b'] },
+    { id: 'b', tags: ['b'] },
+    { id: 'empty', tags: [] },
+    { id: 'null', tags: null },
+    { id: 'withnull', tags: ['a', null] },
+    { id: 'onlynull', tags: [null] },
+  ]);
+  await db.query("INSERT INTO test_array_predicates SET id = 'missing'");
+  const cases = [
+    [ArrayContains(['a']), ['a', 'withnull']],
+    [ArrayContains([]), ['a', 'b', 'empty', 'onlynull', 'withnull']],
+    [ArrayContains([null]), []],
+    [ArrayContains(['a', 'a']), ['a', 'withnull']],
+    [Not(ArrayContains(['a'])), ['b', 'empty', 'onlynull']],
+    [Not(ArrayContains([null])), ['a', 'b', 'empty', 'onlynull', 'withnull']],
+    [ArrayContainedBy(['a', 'b']), ['a', 'b', 'empty']],
+    [ArrayContainedBy(['a', null]), ['empty']],
+    [ArrayContainedBy([]), ['empty']],
+    [Not(ArrayContainedBy(['a', 'b'])), ['onlynull', 'withnull']],
+    [ArrayOverlap(['a', null]), ['a', 'withnull']],
+    [ArrayOverlap([null]), []],
+    [Not(ArrayOverlap(['a', null])), ['b', 'empty', 'onlynull']],
+    [Not(ArrayOverlap([])), ['a', 'b', 'empty', 'onlynull', 'withnull']],
+    [Not(And(ArrayContains(['a']), ArrayOverlap(['b']))), ['b', 'empty', 'onlynull', 'withnull']],
+    [Or(ArrayContains(['a']), ArrayContainedBy([])), ['a', 'empty', 'withnull']],
+    [ArrayContains(null), []],
+    [Not(ArrayContains(null)), []],
+  ];
+  for (const [operator, expected] of cases)
+    assert.deepEqual(
+      (await repo.find({ where: { tags: operator }, order: { id: 'ASC' } })).map((row) => row.id),
+      expected,
+    );
+  assert.deepEqual(
+    (await repo.findBy({ id: Any(['a', null]) })).map((row) => row.id),
+    ['a'],
+  );
+  assert.deepEqual(await repo.findBy({ id: Not(Any(['a', null])) }), []);
+  assert.equal(await repo.countBy({ id: Any([]) }), 0);
+  assert.equal(await repo.countBy({ id: Not(Any([])) }), 7);
+  assert.equal(
+    (
+      await repo
+        .createQueryBuilder()
+        .update()
+        .set({ tags: ['changed'] })
+        .where({ tags: ArrayOverlap(['b']) })
+        .execute()
+    ).affected,
+    2,
+  );
+  assert.equal(
+    (
+      await repo
+        .createQueryBuilder()
+        .delete()
+        .where({ tags: ArrayContains(['changed']) })
+        .execute()
+    ).affected,
+    2,
+  );
+});
