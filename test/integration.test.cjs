@@ -154,6 +154,7 @@ test('automatic timestamps, versions, soft deletion and restoration', async (t) 
   const source = await new ArcadeDataSource({ ...options, entities: [Audit] }).initialize();
   t.after(() => source.destroy());
   const repo = source.getRepository(Audit);
+  await repo.clear();
   const item = await repo.save({ name: 'first' });
   assert.ok(item.createdAt instanceof Date && Number.isFinite(item.createdAt.getTime()));
   assert.equal(item.version, 1);

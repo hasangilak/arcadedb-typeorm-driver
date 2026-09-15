@@ -5,5 +5,5 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY test ./test
-RUN npm run build
+RUN npm run build && npm run test:types
 CMD ["node", "--test", "test/unit.test.cjs", "test/integration.test.cjs"]

@@ -8,7 +8,8 @@
     "test": "npm run build && node --test test/unit.test.cjs",
     "test:integration": "npm run build && node --test test/integration.test.cjs",
     "test:docker": "node scripts/test-docker.cjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:types": "tsc --strict --noEmit --module Node16 --target ES2022 --experimentalDecorators --emitDecoratorMetadata --skipLibCheck test/types.ts"
   },
   "keywords": [],
   "author": "",
