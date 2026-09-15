@@ -580,6 +580,20 @@ test('insert/delete returning and duplicate ignore preserve result identity and 
     /null/i,
   );
   assert.equal(await repo.countBy({ slug: 'rollback' }), 0);
+  await db.query('ALTER PROPERTY test_insert_returns.count MIN 0');
+  await assert.rejects(
+    repo
+      .createQueryBuilder()
+      .insert()
+      .values([
+        { slug: 'rollback-server', title: 'valid', count: 1 },
+        { slug: 'invalid-server', title: 'invalid', count: -1 },
+      ])
+      .orIgnore()
+      .execute(),
+    QueryFailedError,
+  );
+  assert.equal(await repo.countBy({ slug: 'rollback-server' }), 0);
   await assert.rejects(
     db.transaction(async (manager) => {
       const removed = await manager

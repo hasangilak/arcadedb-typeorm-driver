@@ -56,7 +56,7 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
     insertUpdateDelete: { inserted: 1, updated: 1, deleted: 1 },
     ...require('./query-expectations.cjs'),
   };
-  assert.equal(Object.keys(queries).length, 106, '106 distinct executable query examples');
+  assert.equal(Object.keys(queries).length, 116, '116 distinct executable query examples');
   assert.deepEqual(Object.keys(queries), Object.keys(expected));
   const snapshot = async () => {
     const result = {};
@@ -160,7 +160,7 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
     const all = await runNode(process.execPath, ['.demo-dist/demo/run.js', 'queries'], {
       env: { ...process.env, ARCADEDB_DATABASE: database },
     });
-    assert.equal((all.stdout.match(/"query":/g) ?? []).length, 106);
+    assert.equal((all.stdout.match(/"query":/g) ?? []).length, 116);
     assert.deepEqual(await snapshot(), before);
     assert.deepEqual(await db.query('SELECT name FROM schema:types ORDER BY name'), schemaBefore);
   });

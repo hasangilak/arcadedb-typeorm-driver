@@ -1,4 +1,4 @@
-// Independent expected results for examples 22–106, using the deterministic demo seeds.
+// Independent expected results for examples 22–116, using the deterministic demo seeds.
 module.exports = {
   findByEquality: ['ada'],
   findOneOptions: 'grace',
@@ -94,4 +94,14 @@ module.exports = {
   upsertRollback: 'original',
   updateReturning: { affected: 1, id: 'one', title: 'after' },
   softDeleteReturning: { affected: 1, deleted: true, visible: 0 },
+  insertReturning: { raw: [{ title: 'inserted' }], inserted: 1 },
+  deleteReturning: { raw: [{ title: 'removed', score: 7 }], affected: 1 },
+  ignoreDuplicates: { ids: ['two'], count: 2 },
+  upsertNamedConstraint: [{ id: 'one', title: 'updated' }],
+  arrayContains: ['book'],
+  arrayContainedBy: ['book', 'support'],
+  arrayOverlap: ['book', 'course'],
+  arrayAny: ['book', 'support'],
+  arrayNegation: ['book', 'support'],
+  queryDeadline: ['course'],
 };
