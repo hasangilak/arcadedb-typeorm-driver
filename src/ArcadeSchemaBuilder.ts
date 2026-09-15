@@ -41,7 +41,7 @@ export class ArcadeSchemaBuilder implements SchemaBuilder {
           if (defaultValue !== undefined) add(`ALTER PROPERTY ${property} DEFAULT ${defaultValue}`);
         }
         const desiredIndexes = [
-          ...metadata.indices.map(index => ({ name: index.name, columns: index.columns, unique: index.isUnique })),
+          ...metadata.indices.filter(index => index.synchronize).map(index => ({ name: index.name, columns: index.columns, unique: index.isUnique })),
           ...metadata.uniques.map(unique => ({ name: unique.name, columns: unique.columns, unique: true })),
         ];
         if (metadata.primaryColumns.length) {

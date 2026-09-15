@@ -17,12 +17,14 @@ test('validates connection options and refuses unsupported features', () => {
   for (const invalid of [
     { database: 'db; drop database other' },
     { database: '' },
+    { database: undefined },
     { username: '' },
     { password: '' },
     { url: 'file:///tmp/database' },
     { requestTimeout: 0 },
     { cache: true },
     { migrationsRun: true },
+    { migrations: { Example: class Example {} } },
   ]) assert.throws(() => new ArcadeDataSource({ ...options, ...invalid }));
 });
 
@@ -104,4 +106,18 @@ test('hydrates ArcadeDB datetime strings consistently across client time zones',
   const column = { type: Date };
   assert.equal(driver.prepareHydratedValue('2026-09-15T10:11:12.123', column).toISOString(), '2026-09-15T10:11:12.123Z');
   assert.equal(driver.prepareHydratedValue('2026-09-15T12:11:12.123+02:00', column).toISOString(), '2026-09-15T10:11:12.123Z');
+});
+
+test('schema synchronization honors index opt-out', async (t) => {
+  const { EntitySchema } = require('typeorm');
+  t.mock.method(global, 'fetch', async url => Response.json({ result: url.includes('/exists/') ? true : [] }));
+  const schema = new EntitySchema({
+    name: 'ExternalIndex',
+    columns: { id: { type: String, primary: true } },
+    indices: [{ name: 'managed_elsewhere', columns: ['id'], synchronize: false }],
+  });
+  const source = await new ArcadeDataSource({ ...options, entities: [schema] }).initialize();
+  t.after(() => source.destroy());
+  const sql = await source.driver.createSchemaBuilder().log();
+  assert.equal(sql.upQueries.some(query => query.query.includes('managed_elsewhere')), false);
 });

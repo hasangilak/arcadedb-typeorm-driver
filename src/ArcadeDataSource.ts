@@ -18,8 +18,8 @@ export class ArcadeDataSource extends DataSource {
   declare driver: ArcadeDriver;
 
   constructor(options: ArcadeDataSourceOptions) {
-    if (!/^[A-Za-z0-9_-]+$/.test(options.database)) throw new Error('Invalid ArcadeDB database name');
-    if (!options.username || !options.password || options.username.includes(':')) throw new Error('ArcadeDB username and password are required');
+    if (typeof options.database !== 'string' || !/^[A-Za-z0-9_-]+$/.test(options.database)) throw new Error('Invalid ArcadeDB database name');
+    if (typeof options.username !== 'string' || typeof options.password !== 'string' || !options.username || !options.password || options.username.includes(':')) throw new Error('ArcadeDB username and password are required');
     const url = new URL(options.url ?? 'http://127.0.0.1:2480');
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
       throw new Error('ArcadeDB URL must use HTTP(S), without credentials, query or fragment');
@@ -27,7 +27,7 @@ export class ArcadeDataSource extends DataSource {
     if (options.requestTimeout !== undefined && (!Number.isSafeInteger(options.requestTimeout) || options.requestTimeout <= 0)) {
       throw new Error('requestTimeout must be a positive integer');
     }
-    if (options.cache || options.migrationsRun || options.migrations?.length) {
+    if (options.cache || options.migrationsRun || (options.migrations && Object.keys(options.migrations).length)) {
       throw new Error('ArcadeDB does not support TypeORM query caching or migration execution; use explicit SQL');
     }
     // TypeORM has no external driver registry. Bootstrap its synchronous constructor
