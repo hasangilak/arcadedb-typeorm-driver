@@ -96,3 +96,45 @@ test('transaction commit, rollback, session isolation and runner release', async
   await assert.rejects(runner.query('SELECT 1'), /released/i);
   await assert.rejects(source.transaction('SERIALIZABLE', async () => {}), /isolation/i);
 });
+
+test('schema defaults, uniqueness, nullability, JSON, dates, transformers and additive sync', async (t) => {
+  const Document = new EntitySchema({
+    name: 'Document', tableName: 'test_document',
+    columns: {
+      id: { type: 'uuid', primary: true, generated: 'uuid' },
+      slug: { type: String, unique: true },
+      title: { type: String, default: 'Untitled' },
+      score: { type: Number, default: 0 },
+      enabled: { type: Boolean, default: false },
+      note: { type: String, nullable: true },
+      data: { type: 'json' },
+      tags: { type: 'array' },
+      date: { type: Date },
+      encoded: { type: String, transformer: { to: value => value == null ? value : 'stored:' + value, from: value => value == null ? value : value.replace(/^stored:/, '') } },
+    },
+    indices: [{ name: 'idx_test_document_score', columns: ['score'] }],
+  });
+  const source = await new ArcadeDataSource({ ...options, entities: [Document] }).initialize();
+  t.after(() => source.destroy());
+  const repo = source.getRepository(Document);
+  await repo.clear();
+  const data = { nested: { text: "O'Reilly", values: [1, false, null] } };
+  const date = new Date('2026-09-15T10:11:12.123Z');
+  const doc = await repo.save({ slug: 'first', data, tags: ['a', 'b'], date, encoded: 'secret' });
+  const loaded = await repo.findOneByOrFail({ id: doc.id });
+  assert.equal(loaded.title, 'Untitled');
+  assert.equal(loaded.score, 0);
+  assert.equal(loaded.enabled, false);
+  assert.equal(loaded.note, null);
+  assert.deepEqual(loaded.data, data);
+  assert.deepEqual(loaded.tags, ['a', 'b']);
+  assert.equal(loaded.date.toISOString(), date.toISOString());
+  assert.equal(loaded.encoded, 'secret');
+  await assert.rejects(repo.insert({ ...doc, id: undefined }), /duplicat/i);
+  await assert.rejects(repo.insert({ ...doc, id: undefined, slug: 'second', title: null }), /null/i);
+  await source.synchronize();
+  assert.equal(await repo.count(), 1);
+  assert.equal((await source.driver.createSchemaBuilder().log()).upQueries.length, 0);
+  const indexes = await source.query('SELECT FROM schema:indexes');
+  assert.ok(indexes.some(index => index.name === 'idx_test_document_score'));
+});

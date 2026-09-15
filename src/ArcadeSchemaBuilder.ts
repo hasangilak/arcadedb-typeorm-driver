@@ -19,6 +19,7 @@ export class ArcadeSchemaBuilder implements SchemaBuilder {
     const runner = this.driver.createQueryRunner();
     try {
       const tables = await runner.getTables();
+      const indexes: { name: string }[] = await runner.query('SELECT FROM schema:indexes');
       const sql = new SqlInMemory();
       const add = (query: string) => sql.upQueries.push(new Query(query));
       const escape = this.driver.escape;
@@ -39,8 +40,19 @@ export class ArcadeSchemaBuilder implements SchemaBuilder {
           const defaultValue = this.driver.normalizeDefault(column);
           if (defaultValue !== undefined) add(`ALTER PROPERTY ${property} DEFAULT ${defaultValue}`);
         }
-        if (!table && metadata.primaryColumns.length) {
-          add(`CREATE INDEX ${escape(this.driver.dataSource.namingStrategy.primaryKeyName(metadata.tableName, metadata.primaryColumns.map(c => c.databaseName)))} IF NOT EXISTS ON ${escape(metadata.tableName)} (${metadata.primaryColumns.map(c => escape(c.databaseName)).join(', ')}) UNIQUE`);
+        const desiredIndexes = [
+          ...metadata.indices.map(index => ({ name: index.name, columns: index.columns, unique: index.isUnique })),
+          ...metadata.uniques.map(unique => ({ name: unique.name, columns: unique.columns, unique: true })),
+        ];
+        if (metadata.primaryColumns.length) {
+          desiredIndexes.push({
+            name: this.driver.dataSource.namingStrategy.primaryKeyName(metadata.tableName, metadata.primaryColumns.map(c => c.databaseName)),
+            columns: metadata.primaryColumns, unique: true,
+          });
+        }
+        for (const index of desiredIndexes) {
+          if (indexes.some(existing => existing.name === index.name)) continue;
+          add(`CREATE INDEX ${escape(index.name)} IF NOT EXISTS ON ${escape(metadata.tableName)} (${index.columns.map(c => escape(c.databaseName)).join(', ')}) ${index.unique ? 'UNIQUE' : 'NOTUNIQUE'}`);
         }
       }
       return sql;

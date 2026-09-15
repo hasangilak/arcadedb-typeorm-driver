@@ -82,7 +82,7 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
     try {
       const params = Array.isArray(parameters) ? Object.fromEntries(parameters.map((value, i) => [`p${i}`, value])) : parameters;
       const { body } = await this.driver.request(`command/${this.driver.database}`, {
-        language: 'sql', command: query, params, serializer: 'record', limit: -1,
+        language: 'sql', command: query, params: params ?? {}, serializer: 'record', limit: -1,
       }, this.session);
       if (!Array.isArray(body.result)) throw new Error('ArcadeDB returned an invalid query result');
       const result = new QueryResult();

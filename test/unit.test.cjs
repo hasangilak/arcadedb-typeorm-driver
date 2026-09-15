@@ -40,3 +40,32 @@ test('binds repeated and spread parameters without touching literals, identifier
   assert.equal(driver.escape('order'), '`order`');
   assert.throws(() => driver.escape('bad`name'));
 });
+
+test('translates ORM aliases and pagination while preserving quoted text', () => {
+  const driver = new ArcadeDataSource(options).driver;
+  const [sql] = driver.escapeQueryWithParameters("SELECT `p`.`name`, '`p`.`name` LIMIT 1 OFFSET 2' AS `text` FROM `person` `p` ORDER BY `p`.`name` LIMIT 2 OFFSET 1", {});
+  assert.equal(sql, "SELECT `name`, '`p`.`name` LIMIT 1 OFFSET 2' AS `text` FROM `person`  ORDER BY `name` SKIP 1 LIMIT 2");
+  assert.throws(() => driver.escapeQueryWithParameters('SELECT * FROM `person` `p` LEFT JOIN `company` `c` ON 1=1', {}), /joins/i);
+});
+
+test('HTTP authentication, errors, malformed responses and parameter validation', async (t) => {
+  const { QueryFailedError } = require('typeorm');
+  const { ArcadeHttpError } = require('../dist');
+  const requests = [];
+  const mock = t.mock.method(global, 'fetch', async (url, init) => {
+    requests.push({ url, init });
+    return Response.json({ result: true });
+  });
+  const source = await new ArcadeDataSource(options).initialize();
+  t.after(() => source.destroy());
+  assert.equal(requests[0].init.headers.Authorization, 'Basic ' + Buffer.from('root:test-password').toString('base64'));
+  assert.ok(requests[0].init.signal instanceof AbortSignal);
+  mock.mock.mockImplementation(async () => Response.json({ detail: 'Invalid query', exception: 'SQLParsingException' }, { status: 400 }));
+  await assert.rejects(source.query('bad SQL'), error => error instanceof QueryFailedError && error.driverError instanceof ArcadeHttpError && error.driverError.status === 400);
+  mock.mock.mockImplementation(async () => new Response('<html>oops</html>', { status: 502 }));
+  await assert.rejects(source.query('SELECT 1'), /non-JSON/);
+  mock.mock.mockImplementation(async () => Response.json({ result: [] }));
+  await assert.rejects(source.query('SELECT :p0', [undefined]), /undefined/i);
+  await assert.rejects(source.query('SELECT :p0', [NaN]), /finite/i);
+  await assert.rejects(source.query('SELECT :p0', [9007199254740993n]), /bigint/i);
+});

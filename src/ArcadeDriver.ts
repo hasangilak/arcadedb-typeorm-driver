@@ -60,7 +60,11 @@ export class ArcadeDriver implements Driver {
         'Content-Type': 'application/json',
         ...(session ? { 'arcadedb-session-id': session } : {}),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body, (_key, value) => {
+        if (value === undefined || typeof value === 'function' || typeof value === 'symbol') throw new Error('SQL parameters cannot contain undefined, functions or symbols');
+        if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('SQL parameters must contain finite numbers');
+        return value;
+      }),
       signal: AbortSignal.timeout(this.arcadeOptions.requestTimeout ?? 30_000),
       redirect: 'error',
     });
@@ -133,6 +137,7 @@ export class ArcadeDriver implements Driver {
 
   preparePersistentValue(value: any, column: ColumnMetadata): any {
     if (column.transformer) value = ApplyValueTransformers.transformTo(column.transformer, value);
+    if (value === null && !column.isNullable) throw new Error(`Column ${column.propertyPath} cannot be null`);
     if (value == null) return value;
     if (column.type === 'simple-json') return JSON.stringify(value);
     if (column.type === 'simple-array') return value.join(',');
