@@ -1,0 +1,25 @@
+services:
+  arcadedb:
+    image: arcadedata/arcadedb:26.9.1
+    environment:
+      JAVA_OPTS: >-
+        -Darcadedb.server.rootPassword=integration-password
+        -Darcadedb.server.defaultDatabases=driver_test[root]
+    ports:
+      - "127.0.0.1:2480:2480"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:2480/api/v1/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+  tests:
+    build: .
+    environment:
+      ARCADEDB_URL: http://arcadedb:2480
+      ARCADEDB_DATABASE: driver_test
+      ARCADEDB_USERNAME: root
+      ARCADEDB_PASSWORD: integration-password
+    depends_on:
+      arcadedb:
+        condition: service_healthy

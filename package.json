@@ -1,0 +1,33 @@
+{
+  "name": "arcadedb-typeorm-driver",
+  "version": "0.1.0",
+  "description": "TypeORM driver for ArcadeDB over its native HTTP API",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/unit.test.cjs",
+    "test:integration": "npm run build && node --test test/integration.test.cjs",
+    "test:docker": "node scripts/test-docker.cjs",
+    "prepack": "npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "peerDependencies": {
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "typescript": "^5.9.3"
+  },
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
+}
