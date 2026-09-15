@@ -18,6 +18,7 @@ services:
   tests:
     build: .
     environment:
+      TZ: Europe/Berlin
       ARCADEDB_URL: http://arcadedb:2480
       ARCADEDB_DATABASE: driver_test
       ARCADEDB_USERNAME: root

@@ -32,6 +32,7 @@ export function translateOrmSql(sql: string): string {
   const aliases: string[] = [];
   for (let i = 0; i < significant.length; i++) {
     const index = significant[i];
+    if (parts[index].toUpperCase() === 'CURRENT_TIMESTAMP') parts[index] = 'sysdate()';
     if (parts[index].toUpperCase() === 'JOIN') throw new Error('ArcadeDB ORM joins are not supported; use native graph SQL');
     if (parts[index].toUpperCase() !== 'FROM') continue;
     const aliasIndex = significant[i + 2];

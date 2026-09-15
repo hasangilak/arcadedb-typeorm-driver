@@ -69,3 +69,39 @@ test('HTTP authentication, errors, malformed responses and parameter validation'
   await assert.rejects(source.query('SELECT :p0', [NaN]), /finite/i);
   await assert.rejects(source.query('SELECT :p0', [9007199254740993n]), /bigint/i);
 });
+
+test('rejects unsupported constraints and indexes before synchronizing', async (t) => {
+  const { EntitySchema } = require('typeorm');
+  t.mock.method(global, 'fetch', async () => Response.json({ result: true }));
+  for (const extra of [
+    { checks: [{ expression: 'age >= 0' }] },
+    { indices: [{ columns: ['age'], where: 'age > 0' }] },
+    { indices: [{ columns: ['age'], fulltext: true }] },
+  ]) {
+    const schema = new EntitySchema({ name: 'Unsupported', columns: { id: { type: String, primary: true }, age: { type: Number } }, ...extra });
+    const source = new ArcadeDataSource({ ...options, entities: [schema] });
+    await assert.rejects(source.initialize(), /not supported/i);
+    assert.equal(source.isInitialized, false);
+    assert.equal(source.driver.connected, false);
+  }
+});
+
+test('creates a missing database only when explicitly enabled', async (t) => {
+  const requests = [];
+  t.mock.method(global, 'fetch', async (url, init) => {
+    requests.push({ url, init });
+    return Response.json({ result: url.endsWith('/server') ? 'ok' : false });
+  });
+  await assert.rejects(new ArcadeDataSource(options).initialize(), /does not exist/);
+  assert.equal(requests.length, 1);
+  const source = await new ArcadeDataSource({ ...options, createDatabase: true }).initialize();
+  assert.equal(JSON.parse(requests[2].init.body).command, 'create database driver_test');
+  await source.destroy();
+});
+
+test('hydrates ArcadeDB datetime strings consistently across client time zones', () => {
+  const driver = new ArcadeDataSource(options).driver;
+  const column = { type: Date };
+  assert.equal(driver.prepareHydratedValue('2026-09-15T10:11:12.123', column).toISOString(), '2026-09-15T10:11:12.123Z');
+  assert.equal(driver.prepareHydratedValue('2026-09-15T12:11:12.123+02:00', column).toISOString(), '2026-09-15T10:11:12.123Z');
+});

@@ -90,6 +90,9 @@ export class ArcadeDriver implements Driver {
       if (metadata.relations.length || metadata.treeType || metadata.tableType !== 'regular') {
         throw new Error(`ArcadeDB supports document entities without ORM relations: ${metadata.name}`);
       }
+      if (metadata.checks.length || metadata.exclusions.length || metadata.indices.some(index => index.where || index.isFulltext || index.isSpatial || index.type)) {
+        throw new Error(`Check/exclusion constraints and specialized indexes are not supported by ArcadeDB synchronization: ${metadata.name}`);
+      }
       for (const column of metadata.columns) {
         if (column.isGenerated && column.generationStrategy !== 'uuid') {
           throw new Error('ArcadeDB supports generated UUIDs or manually assigned primary keys, not auto-increment');
@@ -149,7 +152,11 @@ export class ArcadeDriver implements Driver {
     if (value != null) {
       if (column.type === 'simple-json' && typeof value === 'string') value = JSON.parse(value);
       else if (column.type === 'simple-array' && typeof value === 'string') value = value ? value.split(',') : [];
-      else if (this.normalizeType(column) === 'datetime') value = new Date(value);
+      else if (this.normalizeType(column) === 'datetime') {
+        // ArcadeDB serializes LocalDateTime without an offset; this driver stores UTC.
+        if (typeof value === 'string' && /^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?$/.test(value)) value += 'Z';
+        value = new Date(value);
+      }
     }
     return column.transformer ? ApplyValueTransformers.transformFrom(column.transformer, value) : value;
   }

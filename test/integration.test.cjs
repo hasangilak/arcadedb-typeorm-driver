@@ -138,3 +138,55 @@ test('schema defaults, uniqueness, nullability, JSON, dates, transformers and ad
   const indexes = await source.query('SELECT FROM schema:indexes');
   assert.ok(indexes.some(index => index.name === 'idx_test_document_score'));
 });
+
+test('automatic timestamps, versions, soft deletion and restoration', async (t) => {
+  const Audit = new EntitySchema({
+    name: 'Audit', tableName: 'test_audit',
+    columns: {
+      id: { type: 'uuid', primary: true, generated: 'uuid' },
+      name: { type: String },
+      createdAt: { type: Date, createDate: true },
+      updatedAt: { type: Date, updateDate: true },
+      deletedAt: { type: Date, deleteDate: true },
+      version: { type: Number, version: true },
+    },
+  });
+  const source = await new ArcadeDataSource({ ...options, entities: [Audit] }).initialize();
+  t.after(() => source.destroy());
+  const repo = source.getRepository(Audit);
+  const item = await repo.save({ name: 'first' });
+  assert.ok(item.createdAt instanceof Date && Number.isFinite(item.createdAt.getTime()));
+  assert.equal(item.version, 1);
+  await repo.update(item.id, { name: 'second' });
+  const updated = await repo.findOneByOrFail({ id: item.id });
+  assert.equal(updated.version, 2);
+  assert.ok(updated.updatedAt instanceof Date && Number.isFinite(updated.updatedAt.getTime()));
+  assert.equal((await repo.softDelete(item.id)).affected, 1);
+  assert.equal(await repo.count(), 0);
+  const deleted = await repo.findOne({ where: { id: item.id }, withDeleted: true });
+  assert.ok(deleted.deletedAt instanceof Date);
+  await repo.restore(item.id);
+  assert.equal(await repo.count(), 1);
+});
+
+test('independent concurrent transactions and rollback on data source destruction', async () => {
+  const source = await new ArcadeDataSource(options).initialize();
+  const repo = source.getRepository(Person);
+  await repo.clear();
+  const first = source.createQueryRunner();
+  const second = source.createQueryRunner();
+  try {
+    await Promise.all([first.startTransaction(), second.startTransaction()]);
+    await first.manager.save(Person, { name: 'first', age: 1, active: true });
+    await second.manager.save(Person, { name: 'second', age: 2, active: true });
+    assert.equal(await first.manager.count(Person), 1);
+    assert.equal(await second.manager.count(Person), 1);
+    await first.commitTransaction();
+    await source.destroy(); // rolls back second
+    assert.ok(first.isReleased && second.isReleased);
+    await source.initialize();
+    assert.deepEqual((await repo.find()).map(p => p.name), ['first']);
+  } finally {
+    if (source.isInitialized) await source.destroy();
+  }
+});
