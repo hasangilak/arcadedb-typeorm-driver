@@ -216,6 +216,22 @@ const groups = await db
 
 Aggregate expressions used by `HAVING` must also be selected with aliases. The driver filters an outer query over the grouped results. This path is tested with raw results, not arbitrary entity hydration or nested expressions.
 
+### Returned update records
+
+```ts
+const updated = await db
+  .getRepository(Person)
+  .createQueryBuilder()
+  .update()
+  .set({ age: 38 })
+  .where({ name: 'Ada' })
+  .returning(['id', 'name', 'age'])
+  .execute();
+console.log(updated.affected, updated.raw);
+```
+
+Update, soft-delete and restore builders accept `returning('*')` or an array of mapped entity property names. `output()` is an alias. The driver translates this to native `RETURN AFTER`; `raw` uses database column names and native values, while entity save hydration converts dates and transformers as usual. Additional version/timestamp columns may be returned for TypeORM’s entity updates. Zero matched rows returns `affected: 0` and an empty array. Arbitrary returning expressions and insert/delete returning are unsupported.
+
 ### Native SQL and parameters
 
 ```ts
@@ -320,14 +336,14 @@ These describe the database or its SQL model, separately from missing driver imp
 
 ### Features ArcadeDB has that this driver does not expose through TypeORM
 
-| Native capability                                            | Current driver boundary                                                                                                                                                                                   |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SQL `UPDATE ... UPSERT` and `RETURN BEFORE` / `RETURN AFTER` | TypeORM `upsert()`, conflict clauses and `returning()` are unsupported; use reviewed native SQL where appropriate. See [UPDATE](https://docs.arcadedb.com/arcadedb/reference/sql/sql-update).             |
-| Links, vertices and edges                                    | Native SQL examples work; ORM relations, cascades and graph entity mapping are missing. See [database basics](https://docs.arcadedb.com/arcadedb/concepts/basics).                                        |
-| Specialized indexes, including full-text and vector indexes  | The schema adapter covers ordinary and unique indexes. Specialized indexes need native commands and their own version-specific tests. See [indexes](https://docs.arcadedb.com/arcadedb/concepts/indexes). |
-| More native property types and constraints                   | Only the mappings listed above are implemented; unsupported mappings are not evidence that ArcadeDB lacks the type. See [properties](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).    |
-| Multiple HTTP query languages                                | This driver submits `sql`; it has no language selector for Cypher, Gremlin or other server languages. See [HTTP API](https://docs.arcadedb.com/arcadedb/reference/http-api/http).                         |
-| Bucket partitioning and HA replication                       | No automatic shard routing, topology discovery or replica routing; see below.                                                                                                                             |
+| Native capability                                            | Current driver boundary                                                                                                                                                                                           |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SQL `UPDATE ... UPSERT` and `RETURN BEFORE` / `RETURN AFTER` | TypeORM `upsert()` and conflict clauses are unsupported; update `returning()` is supported. Use reviewed native SQL where appropriate. See [UPDATE](https://docs.arcadedb.com/arcadedb/reference/sql/sql-update). |
+| Links, vertices and edges                                    | Native SQL examples work; ORM relations, cascades and graph entity mapping are missing. See [database basics](https://docs.arcadedb.com/arcadedb/concepts/basics).                                                |
+| Specialized indexes, including full-text and vector indexes  | The schema adapter covers ordinary and unique indexes. Specialized indexes need native commands and their own version-specific tests. See [indexes](https://docs.arcadedb.com/arcadedb/concepts/indexes).         |
+| More native property types and constraints                   | Only the mappings listed above are implemented; unsupported mappings are not evidence that ArcadeDB lacks the type. See [properties](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).            |
+| Multiple HTTP query languages                                | This driver submits `sql`; it has no language selector for Cypher, Gremlin or other server languages. See [HTTP API](https://docs.arcadedb.com/arcadedb/reference/http-api/http).                                 |
+| Bucket partitioning and HA replication                       | No automatic shard routing, topology discovery or replica routing; see below.                                                                                                                                     |
 
 The pinned server also needs dialect adaptations for the TypeORM existence wrapper, case-conversion expressions and aggregate filtering. Those implemented translations do not make arbitrary SQL from another database portable.
 
@@ -337,7 +353,7 @@ The following are **driver limitations**, not blanket claims about ArcadeDB:
 
 - ORM relations, relation query builders, relation cascades/eager loading, tree repositories and graph entity mapping.
 - Relational joins, aliased ORM subqueries, general correlated `EXISTS` and common table expressions.
-- TypeORM upserts, `orUpdate()`, `orIgnore()`, `returning()` and `output()`.
+- TypeORM upserts, `orUpdate()` and `orIgnore()`. Insert/delete `returning()` and `output()` remain unsupported; update, soft-delete and restore support them.
 - PostgreSQL-style `ArrayContains`, `ArrayContainedBy`, `ArrayOverlap`, `JsonContains` and `Any` operators. Use native SQL for supported database equivalents.
 - Query caching, result streaming, pessimistic/dirty-read locks, `NOWAIT` / `SKIP LOCKED`, `distinctOn()`, index hints and SQL execution-time hints. `requestTimeout` is a client request limit, not a server-side query hint.
 - Auto-increment/identity generation, SQL schemas, views, foreign-key/check/exclusion schema APIs and specialized index metadata.

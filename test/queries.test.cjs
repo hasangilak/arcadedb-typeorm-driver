@@ -128,8 +128,7 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
           )
           .getMany(),
       stream: () => qb().stream(),
-      returning: () =>
-        qb().update().set({ active: true }).where({ id: 'ada' }).returning('*').execute(),
+      returning: () => qb().delete().where({ id: 'ada' }).returning('*').execute(),
       upsert: () => repo.upsert({ id: 'ada', active: true }, ['id']),
       ignore: () => qb().insert().values({ id: 'ada' }).orIgnore().execute(),
       cache: () => repo.find({ cache: true }),

@@ -77,11 +77,13 @@ export function translateOrmSql(sql: string): string {
       }
     }
   }
-  return rewriteFunctionsAndHaving(
-    parts
-      .join('')
-      .replace(/\bLIMIT (\d+) OFFSET (\d+)\s*$/i, 'SKIP $2 LIMIT $1')
-      .replace(/\bOFFSET (\d+)\s*$/i, 'SKIP $1'),
+  return rewriteUpdateReturning(
+    rewriteFunctionsAndHaving(
+      parts
+        .join('')
+        .replace(/\bLIMIT (\d+) OFFSET (\d+)\s*$/i, 'SKIP $2 LIMIT $1')
+        .replace(/\bOFFSET (\d+)\s*$/i, 'SKIP $1'),
+    ),
   );
 }
 
@@ -153,4 +155,44 @@ function rewriteFunctionsAndHaving(sql: string): string {
   )
     throw new Error('HAVING aggregates must also be selected with an alias');
   return `SELECT FROM (${render(words.slice(0, having))}) WHERE ${render(predicate)} ${render(words.slice(tail))}`.trim();
+}
+
+/** Bare top-level words only: parameters, comments and quoted text are never SQL clauses. */
+function statementWords(sql: string): { word: string; index: number; end: number }[] {
+  const pattern =
+    /'(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\r\n]*|\/\*[\s\S]*?\*\/|:[A-Za-z_][A-Za-z0-9_]*|([A-Za-z_][A-Za-z0-9_]*)|([()])/g;
+  const words: { word: string; index: number; end: number }[] = [];
+  let depth = 0;
+  for (const match of sql.matchAll(pattern)) {
+    if (match[2] === '(') depth++;
+    else if (match[2] === ')') depth--;
+    else if (!depth && match[1])
+      words.push({
+        word: match[1].toUpperCase(),
+        index: match.index,
+        end: match.index + match[0].length,
+      });
+  }
+  return words;
+}
+
+function rewriteUpdateReturning(sql: string): string {
+  const words = statementWords(sql);
+  if (words[0]?.word !== 'UPDATE') return sql;
+  const returning = words.find((word) => word.word === 'RETURNING');
+  if (!returning) return sql;
+  const where = words.find((word) => word.word === 'WHERE');
+  const projection = sql.slice(returning.end).trim();
+  const end = where?.index ?? returning.index;
+  return `${sql.slice(0, end).trimEnd()} RETURN AFTER ${projection === '*' ? '@this' : projection}${where ? ' ' + sql.slice(where.index, returning.index).trim() : ''}`;
+}
+
+export function updateReturnsRecords(sql: string): boolean {
+  const words = statementWords(sql);
+  const returning = words.findIndex((word) => word.word === 'RETURN');
+  return (
+    words[0]?.word === 'UPDATE' &&
+    returning >= 0 &&
+    ['BEFORE', 'AFTER'].includes(words[returning + 1]?.word)
+  );
 }

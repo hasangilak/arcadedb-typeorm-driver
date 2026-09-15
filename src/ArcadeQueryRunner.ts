@@ -13,6 +13,7 @@ import { QueryResult } from 'typeorm/query-runner/QueryResult';
 import { BroadcasterResult } from 'typeorm/subscriber/BroadcasterResult';
 import { Broadcaster } from 'typeorm/subscriber/Broadcaster';
 import type { IsolationLevel } from 'typeorm/driver/types/IsolationLevel';
+import { updateReturnsRecords } from './sql';
 import type { ArcadeDriver } from './ArcadeDriver';
 
 async function unsupported(..._args: unknown[]): Promise<never> {
@@ -137,9 +138,11 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
       const result = new QueryResult();
       result.records = body.result;
       result.raw = body.result;
-      if (/^\s*(UPDATE|DELETE)\b/i.test(query))
-        result.affected = Number(body.result[0]?.count ?? 0);
-      else if (/^\s*INSERT\b/i.test(query)) result.affected = body.result.length;
+      if (/^\s*(UPDATE|DELETE)\b/i.test(statement))
+        result.affected = updateReturnsRecords(query)
+          ? body.result.length
+          : Number(body.result[0]?.count ?? 0);
+      else if (/^\s*INSERT\b/i.test(statement)) result.affected = body.result.length;
       const elapsed = Date.now() - started;
       if (
         this.dataSource.options.maxQueryExecutionTime &&

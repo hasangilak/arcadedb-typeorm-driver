@@ -57,13 +57,36 @@ function arcadeBuilder(builder: QueryBuilder<any>): QueryBuilder<any> {
 
 class ArcadeUpdateQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   UpdateQueryBuilder,
-)<Entity> {}
+)<Entity> {
+  override returning(columns: string | string[]): this {
+    validateReturning(this, columns);
+    return super.returning(columns);
+  }
+}
 class ArcadeDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   DeleteQueryBuilder,
 )<Entity> {}
 class ArcadeSoftDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   SoftDeleteQueryBuilder,
-)<Entity> {}
+)<Entity> {
+  override returning(columns: string | string[]): this {
+    validateReturning(this, columns);
+    return super.returning(columns);
+  }
+}
+
+function validateReturning(builder: QueryBuilder<any>, columns: string | string[]): void {
+  if (columns === '*') return;
+  const metadata = builder.expressionMap.mainAlias?.hasMetadata
+    ? builder.expressionMap.mainAlias.metadata
+    : undefined;
+  if (
+    !Array.isArray(columns) ||
+    !metadata ||
+    columns.some((name) => !metadata.findColumnsWithPropertyPath(name).length)
+  )
+    throw new Error('ArcadeDB returning requires * or an array of mapped entity property names');
+}
 
 /** Reject options TypeORM otherwise silently ignores for an external driver. */
 export class ArcadeSelectQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(

@@ -274,8 +274,8 @@ export class ArcadeDriver implements Driver {
   async obtainSlaveConnection(): Promise<ArcadeDriver> {
     return this;
   }
-  isReturningSqlSupported(): boolean {
-    return false;
+  isReturningSqlSupported(returningType: string): boolean {
+    return returningType === 'update';
   }
   isUUIDGenerationSupported(): boolean {
     return false;

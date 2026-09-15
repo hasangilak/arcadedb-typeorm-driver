@@ -255,3 +255,85 @@ test('query subscriber events cover repository operations and transaction sessio
   assert.equal(events.at(-1)[1].success, false);
   assert.ok(events.at(-1)[1].error);
 });
+
+test('UPDATE returning hydrates entity changes, projects columns and reports affected rows', async (t) => {
+  const Returning = new EntitySchema({
+    name: 'Returning',
+    tableName: 'test_returning',
+    columns: {
+      id: { type: String, primary: true },
+      title: { name: 'stored_title', type: String },
+      count: { type: Number },
+      updatedAt: { type: Date, updateDate: true },
+      deletedAt: { type: Date, deleteDate: true },
+      version: { type: Number, version: true },
+    },
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Returning] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Returning);
+  await repo.clear();
+  await repo.save([
+    { id: 'one', title: 'first', count: 90 },
+    { id: 'two', title: 'second', count: 91 },
+  ]);
+  const result = await repo
+    .createQueryBuilder()
+    .update()
+    .set({ title: 'changed WHERE RETURNING' })
+    .where('id IN (:...ids)', { ids: ['one', 'two'] })
+    .returning(['id', 'title', 'count'])
+    .execute();
+  assert.equal(result.affected, 2);
+  assert.deepEqual(result.raw.map((row) => row.id).sort(), ['one', 'two']);
+  assert.ok(result.raw.every((row) => row.stored_title === 'changed WHERE RETURNING'));
+  assert.equal(result.raw[0].count >= 90, true);
+  assert.equal(
+    (
+      await repo
+        .createQueryBuilder()
+        .update()
+        .set({ count: 1 })
+        .where('id = :id', { id: 'absent' })
+        .returning('*')
+        .execute()
+    ).affected,
+    0,
+  );
+  const entity = await repo.findOneByOrFail({ id: 'one' });
+  entity.title = 'saved';
+  await repo.save(entity);
+  assert.equal(entity.version, 3);
+  assert.ok(entity.updatedAt instanceof Date);
+  const removed = await repo
+    .createQueryBuilder()
+    .softDelete()
+    .where('id = :id', { id: 'one' })
+    .returning('*')
+    .execute();
+  assert.equal(removed.affected, 1);
+  assert.ok(removed.raw[0].deletedAt);
+  const restored = await repo
+    .createQueryBuilder()
+    .restore()
+    .where('id = :id', { id: 'one' })
+    .returning(['id', 'deletedAt'])
+    .execute();
+  assert.equal(restored.affected, 1);
+  assert.equal(restored.raw[0].deletedAt, null);
+  await assert.rejects(
+    db.transaction(async (manager) => {
+      const changed = await manager
+        .createQueryBuilder()
+        .update(Returning)
+        .set({ count: 500 })
+        .where('id = :id', { id: 'one' })
+        .returning('*')
+        .execute();
+      assert.equal(changed.raw[0].count, 500);
+      throw new Error('undo returning');
+    }),
+    /undo returning/,
+  );
+  assert.equal((await repo.findOneByOrFail({ id: 'one' })).count, 90);
+});

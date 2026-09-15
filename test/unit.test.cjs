@@ -281,3 +281,43 @@ test('query subscribers are awaited and receive success, failure, parameters and
   assert.equal(events[1][1].error.message, 'request failed');
   await runner.release();
 });
+
+test('UPDATE returning is translated before WHERE without changing literals', () => {
+  const db = new ArcadeDataSource(options);
+  const qb = db
+    .createQueryBuilder()
+    .update('documents')
+    .set({ title: 'WHERE RETURNING' })
+    .where('id = :id', { id: 'x' })
+    .returning('*');
+  const [sql, parameters] = qb.getQueryAndParameters();
+  assert.match(sql, /RETURN AFTER @this WHERE/);
+  assert.deepEqual(parameters, ['WHERE RETURNING', 'x']);
+});
+
+test('returning rejects unsupported expressions and counts returned records independently of count fields', async (t) => {
+  const db = new ArcadeDataSource(options);
+  assert.throws(
+    () => db.createQueryBuilder().update('documents').returning('id; DELETE FROM documents'),
+    /returning/i,
+  );
+  assert.throws(
+    () => db.createQueryBuilder().update('documents').returning(['missing']),
+    /returning/i,
+  );
+  t.mock.method(global, 'fetch', async (url) =>
+    Response.json({ result: url.includes('/exists/') ? true : [{ count: 99 }] }),
+  );
+  await db.initialize();
+  t.after(() => db.destroy());
+  const runner = db.createQueryRunner();
+  const returned = await runner.query(
+    '/* audit */ UPDATE documents SET count = 99 RETURN BEFORE @this',
+    [],
+    true,
+  );
+  assert.equal(returned.affected, 1);
+  const counted = await runner.query("UPDATE documents SET title = 'RETURN AFTER'", [], true);
+  assert.equal(counted.affected, 99);
+  await runner.release();
+});
