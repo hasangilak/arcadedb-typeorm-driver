@@ -510,7 +510,7 @@ npm run test:types        # compile the TypeScript consumer fixture
 npm run test:docker       # build and all tests against a disposable Docker server
 ```
 
-The full Docker suite includes assertions for the 116 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
+The latest full Docker run passed **204 tests, including subtests**. It includes assertions for the 116 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
 
 `test:docker` starts a dedicated Compose project, waits for database readiness and removes its containers and volumes even on failure. It also builds the driver/demo, checks types, ESLint and formatting, and installs the private package into isolated consumer apps through both tarball and pinned Git dependencies. Consumer tests verify CommonJS/ESM imports, TypeScript declarations, CRUD, upserts, returning results and rollback against Docker. The packaging test needs Git and access to npm dependencies. Stop any other server using port 2480 before running it.
 
