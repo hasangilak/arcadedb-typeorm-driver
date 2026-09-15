@@ -159,7 +159,7 @@ function projectReturnedRows(builder: QueryBuilder<any>, rows: ObjectLiteral[]):
   const columns = returning.flatMap((name) =>
     builder.expressionMap.mainAlias!.metadata.findColumnsWithPropertyPath(name),
   );
-  return rows.map((row) =>
+  return (rows ?? []).map((row) =>
     Object.fromEntries(columns.map((column) => [column.databaseName, row[column.databaseName]])),
   );
 }

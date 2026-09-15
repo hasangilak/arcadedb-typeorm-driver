@@ -529,6 +529,9 @@ test('insert/delete returning and duplicate ignore preserve result identity and 
   assert.match(inserted.identifiers[0].id, /^[\da-f-]{36}$/);
   assert.equal(inserted.generatedMaps[0].count, 99);
   assert.ok(inserted.generatedMaps[0].createdAt instanceof Date);
+  const empty = await repo.createQueryBuilder().insert().values([]).returning(['title']).execute();
+  assert.deepEqual(empty.raw, []);
+  assert.deepEqual(empty.identifiers, []);
   const events = [];
   db.subscribers.push({
     afterInsert(event) {
