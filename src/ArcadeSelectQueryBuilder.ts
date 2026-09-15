@@ -180,7 +180,23 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
     )
       throw new Error('These ArcadeDB upsert options are not supported');
     const metadata = map.mainAlias.metadata;
-    const conflict = options.conflict;
+    let conflict = options.conflict;
+    if (typeof conflict === 'string') {
+      const primaryName =
+        metadata.primaryColumns[0]?.primaryKeyConstraintName ??
+        this.dataSource.namingStrategy.primaryKeyName(
+          metadata.tableName,
+          metadata.primaryColumns.map((column) => column.databaseName),
+        );
+      const named = [
+        ...metadata.uniques,
+        ...metadata.indices.filter((index) => index.isUnique),
+      ].find((index) => index.name === conflict);
+      const namedColumns =
+        named?.columns ?? (conflict === primaryName ? metadata.primaryColumns : undefined);
+      if (!namedColumns?.length) throw new Error(`Unknown mapped unique constraint: ${conflict}`);
+      conflict = namedColumns.map((column) => column.databaseName);
+    }
     if (!Array.isArray(conflict) || !conflict.length || new Set(conflict).size !== conflict.length)
       throw new Error('ArcadeDB upsert requires explicit conflict columns');
     const columns = conflict.map((name) => {
@@ -273,17 +289,24 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
       const table = columns ? await runner.getTable(this.getMainTableName()) : undefined;
       const uniqueKeys = table
         ? [
-            table.primaryColumns.map((column) => column.name),
-            ...table.uniques.map((unique) => unique.columnNames),
-            ...table.indices.filter((index) => index.isUnique).map((index) => index.columnNames),
+            {
+              name: table.primaryColumns[0]?.primaryKeyConstraintName,
+              columns: table.primaryColumns.map((column) => column.name),
+            },
+            ...table.uniques.map((unique) => ({ name: unique.name, columns: unique.columnNames })),
+            ...table.indices
+              .filter((index) => index.isUnique)
+              .map((index) => ({ name: index.name, columns: index.columnNames })),
           ]
         : [];
       if (
         columns &&
         !uniqueKeys.some(
           (key) =>
-            key.length === columns.length &&
-            columns.every((column) => key.includes(column.databaseName)),
+            key.columns.length === columns.length &&
+            (typeof this.expressionMap.onUpdate?.conflict !== 'string' ||
+              key.name === this.expressionMap.onUpdate.conflict) &&
+            columns.every((column) => key.columns.includes(column.databaseName)),
         )
       )
         throw new Error(

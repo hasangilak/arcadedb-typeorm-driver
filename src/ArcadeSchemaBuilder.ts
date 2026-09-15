@@ -60,10 +60,12 @@ export class ArcadeSchemaBuilder implements SchemaBuilder {
         ];
         if (metadata.primaryColumns.length) {
           desiredIndexes.push({
-            name: this.driver.dataSource.namingStrategy.primaryKeyName(
-              metadata.tableName,
-              metadata.primaryColumns.map((c) => c.databaseName),
-            ),
+            name:
+              metadata.primaryColumns[0].primaryKeyConstraintName ??
+              this.driver.dataSource.namingStrategy.primaryKeyName(
+                metadata.tableName,
+                metadata.primaryColumns.map((c) => c.databaseName),
+              ),
             columns: metadata.primaryColumns,
             unique: true,
           });

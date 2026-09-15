@@ -610,3 +610,56 @@ test('insert/delete returning and duplicate ignore preserve result identity and 
   assert.equal(absent.affected, 0);
   assert.deepEqual(absent.raw, []);
 });
+
+test('named upsert constraints resolve declared and installed unique keys', async (t) => {
+  const Item = new EntitySchema({
+    name: 'NamedConflict',
+    tableName: 'test_named_conflict',
+    columns: {
+      id: { type: String, primary: true, primaryKeyConstraintName: 'pk_named_conflict' },
+      tenant: { type: String },
+      slug: { name: 'stored_slug', type: String },
+      value: { type: Number },
+    },
+    uniques: [{ name: 'uq_named_conflict', columns: ['tenant', 'slug'] }],
+    indices: [{ name: 'idx_named_value', columns: ['value'] }],
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Item] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Item);
+  await repo.clear();
+  const named = (value) =>
+    repo.createQueryBuilder().insert().values(value).orUpdate(['value'], 'uq_named_conflict');
+  await named({ id: 'first', tenant: 'a', slug: 'x', value: 1 }).execute();
+  const updated = await named({ id: 'unused', tenant: 'a', slug: 'x', value: 2 }).clone().execute();
+  assert.equal(updated.identifiers[0].id, 'first');
+  assert.equal(updated.raw[0].value, 2);
+  await repo
+    .createQueryBuilder()
+    .insert()
+    .values({ id: 'first', tenant: 'a', slug: 'x', value: 3 })
+    .orUpdate(['value'], 'pk_named_conflict')
+    .execute();
+  assert.equal((await repo.findOneByOrFail({ id: 'first' })).value, 3);
+  for (const name of ['missing_constraint', 'idx_named_value'])
+    await assert.rejects(
+      repo
+        .createQueryBuilder()
+        .insert()
+        .values({ id: 'other', tenant: 'b', slug: 'y', value: 9 })
+        .orUpdate(['value'], name)
+        .execute(),
+      /unique|constraint/i,
+    );
+  const runner = db.createQueryRunner();
+  try {
+    await runner.dropUniqueConstraint('test_named_conflict', 'uq_named_conflict');
+    await assert.rejects(
+      named({ id: 'other', tenant: 'a', slug: 'x', value: 4 }).execute(),
+      /installed unique/i,
+    );
+  } finally {
+    await runner.release();
+  }
+  assert.equal((await repo.findOneByOrFail({ id: 'first' })).value, 3);
+});
