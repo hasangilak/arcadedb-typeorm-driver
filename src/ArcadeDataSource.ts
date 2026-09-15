@@ -1,8 +1,17 @@
 import 'reflect-metadata';
-import { CannotExecuteNotConnectedError, DataSource, type DataSourceOptions } from 'typeorm';
+import {
+  CannotExecuteNotConnectedError,
+  DataSource,
+  type DataSourceOptions,
+  type EntityTarget,
+  type ObjectLiteral,
+  type QueryRunner,
+  type SelectQueryBuilder,
+} from 'typeorm';
 import type { BaseDataSourceOptions } from 'typeorm/data-source/BaseDataSourceOptions';
 import { ArcadeDriver } from './ArcadeDriver';
 import { ArcadeMigrationExecutor } from './ArcadeMigrationExecutor';
+import { ArcadeSelectQueryBuilder } from './ArcadeSelectQueryBuilder';
 
 export interface ArcadeDataSourceOptions extends Omit<BaseDataSourceOptions, 'type'> {
   type?: 'arcadedb';
@@ -53,6 +62,26 @@ export class ArcadeDataSource extends DataSource {
       options: { ...options, type: 'arcadedb' } as unknown as DataSourceOptions,
     });
     this.driver = new ArcadeDriver(this, options);
+  }
+
+  override createQueryBuilder<Entity extends ObjectLiteral>(
+    entity: EntityTarget<Entity>,
+    alias: string,
+    queryRunner?: QueryRunner,
+  ): SelectQueryBuilder<Entity>;
+  override createQueryBuilder(queryRunner?: QueryRunner): SelectQueryBuilder<any>;
+  override createQueryBuilder(
+    entityOrRunner?: EntityTarget<any> | QueryRunner,
+    alias?: string,
+    queryRunner?: QueryRunner,
+  ): SelectQueryBuilder<any> {
+    if (alias) {
+      const metadata = this.getMetadata(entityOrRunner as EntityTarget<any>);
+      return new ArcadeSelectQueryBuilder(this, queryRunner)
+        .select(alias)
+        .from(metadata.target, alias);
+    }
+    return new ArcadeSelectQueryBuilder(this, entityOrRunner as QueryRunner | undefined);
   }
 
   private migrationExecutor(options?: {

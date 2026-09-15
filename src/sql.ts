@@ -35,6 +35,12 @@ export function escapeIdentifier(name: string): string {
 
 /** Translate TypeORM's single-entity SQL; raw query() SQL is left untouched. */
 export function translateOrmSql(sql: string): string {
+  // TypeORM's exists()/getExists() wrapper uses SQL EXISTS, absent in ArcadeDB SQL.
+  // Its only observable result is whether the inner query produces at least one row.
+  const exists = sql.match(
+    /^SELECT 1 AS `row_exists` FROM \(SELECT 1 AS dummy_column\) `dummy_table` WHERE EXISTS \(([\s\S]+)\) LIMIT 1$/,
+  );
+  if (exists) return translateOrmSql(`${exists[1]} LIMIT 1`);
   const parts =
     sql.match(
       /'(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\r\n]*|\/\*[\s\S]*?\*\/|\s+|[A-Za-z_][A-Za-z0-9_]*|[^\s]/g,
@@ -46,6 +52,14 @@ export function translateOrmSql(sql: string): string {
     if (parts[index].toUpperCase() === 'CURRENT_TIMESTAMP') parts[index] = 'sysdate()';
     if (parts[index].toUpperCase() === 'JOIN')
       throw new Error('ArcadeDB ORM joins are not supported; use native graph SQL');
+    const next = parts[significant[i + 1]];
+    if (
+      ['@>', '<@', '&&'].includes(parts[index] + next) ||
+      (parts[index].toUpperCase() === 'ANY' && next === '(')
+    )
+      throw new Error(
+        'PostgreSQL array/JSON operators and ANY are not supported; use native ArcadeDB predicates',
+      );
     if (parts[index].toUpperCase() !== 'FROM') continue;
     const aliasIndex = significant[i + 2];
     if (parts[significant[i + 1]]?.startsWith('`') && parts[aliasIndex]?.startsWith('`')) {
@@ -63,8 +77,80 @@ export function translateOrmSql(sql: string): string {
       }
     }
   }
-  return parts
-    .join('')
-    .replace(/\bLIMIT (\d+) OFFSET (\d+)\s*$/i, 'SKIP $2 LIMIT $1')
-    .replace(/\bOFFSET (\d+)\s*$/i, 'SKIP $1');
+  return rewriteFunctionsAndHaving(
+    parts
+      .join('')
+      .replace(/\bLIMIT (\d+) OFFSET (\d+)\s*$/i, 'SKIP $2 LIMIT $1')
+      .replace(/\bOFFSET (\d+)\s*$/i, 'SKIP $1'),
+  );
+}
+
+function rewriteFunctionsAndHaving(sql: string): string {
+  // Quoted literals/identifiers and parameters remain atomic during dialect rewrites.
+  const words: string[] =
+    sql.match(
+      /'(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|--[^\r\n]*|\/\*[\s\S]*?\*\/|:[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|>=|<=|<>|!=|\|\||[^\s]/g,
+    ) ?? [];
+  const render = (tokens: string[]) =>
+    tokens
+      .filter(Boolean)
+      .map((word) => (word.startsWith('--') ? word + '\n' : word))
+      .join(' ');
+  const stack: number[] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '(') stack.push(i);
+    if (words[i] !== ')') continue;
+    const open = stack.pop();
+    if (open !== undefined && /^(UPPER|LOWER)$/i.test(words[open - 1] ?? '')) {
+      const method = words[open - 1].toUpperCase() === 'UPPER' ? 'toUpperCase' : 'toLowerCase';
+      words[open - 1] = '';
+      words[i] += `.${method}()`;
+    }
+  }
+  // Preserve existing whitespace except when a rewrite is needed.
+  const changedFunctions = words.includes('');
+  const positions: number[] = [];
+  let depth = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '(') depth++;
+    if (words[i].startsWith(')')) depth--;
+    if (!depth) positions.push(i);
+  }
+  const having = positions.find((i) => words[i].toUpperCase() === 'HAVING');
+  if (having === undefined) return changedFunctions ? render(words) : sql;
+  const from = positions.find((i) => words[i].toUpperCase() === 'FROM');
+  if (from === undefined) throw new Error('HAVING requires a SELECT query');
+  const tail =
+    positions.find(
+      (i) => i > having && ['ORDER', 'SKIP', 'LIMIT'].includes(words[i].toUpperCase()),
+    ) ?? words.length;
+  const selections: { expression: string[]; alias: string }[] = [];
+  let start = 1;
+  for (const end of [...positions.filter((i) => i < from && words[i] === ','), from]) {
+    const projection = words.slice(start, end);
+    const as = projection.map((word) => word.toUpperCase()).lastIndexOf('AS');
+    if (as > 0 && projection[as + 1])
+      selections.push({ expression: projection.slice(0, as), alias: projection[as + 1] });
+    start = end + 1;
+  }
+  const predicate = words.slice(having + 1, tail);
+  for (const { expression, alias } of selections.sort(
+    (a, b) => b.expression.length - a.expression.length,
+  )) {
+    for (let i = 0; i <= predicate.length - expression.length; i++) {
+      if (
+        expression.every((word, j) =>
+          /^[A-Za-z_]/.test(word)
+            ? word.toUpperCase() === predicate[i + j]?.toUpperCase()
+            : word === predicate[i + j],
+        )
+      )
+        predicate.splice(i, expression.length, alias);
+    }
+  }
+  if (
+    predicate.some((word, i) => /^(sum|count|avg|min|max)$/i.test(word) && predicate[i + 1] === '(')
+  )
+    throw new Error('HAVING aggregates must also be selected with an alias');
+  return `SELECT FROM (${render(words.slice(0, having))}) WHERE ${render(predicate)} ${render(words.slice(tail))}`.trim();
 }

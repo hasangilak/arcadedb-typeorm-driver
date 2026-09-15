@@ -4,6 +4,50 @@ const { ArcadeDataSource } = require('../dist');
 
 const options = { database: 'driver_test', username: 'root', password: 'test-password' };
 
+test('unsupported query options reject instead of silently changing semantics', async (t) => {
+  const db = new ArcadeDataSource(options);
+  const select = () =>
+    db.createQueryBuilder().select('account.id').from('demo_accounts', 'account');
+  const cases = {
+    distinctOn: () => select().distinctOn(['account.id']),
+    cache: () => select().cache(true),
+    indexHint: () => select().useIndex('idx_account'),
+    timeTravel: () => select().timeTravelQuery('yesterday'),
+    executionHint: () => select().maxExecutionTime(100),
+    dirtyRead: () => select().setLock('dirty_read'),
+    cte: () => select().addCommonTableExpression('SELECT 1', 'numbers'),
+    ignoreConflicts: () =>
+      db.createQueryBuilder().insert().into('demo_accounts').values({ id: 'x' }).orIgnore(),
+  };
+  for (const [name, create] of Object.entries(cases)) {
+    await t.test(name, () => assert.throws(() => create().getQuery(), /not supported/i));
+  }
+});
+
+test('dialect rewrites preserve comparison operators, decimals, literals and comments', () => {
+  const driver = new ArcadeDataSource(options).driver;
+  const [sql, params] = driver.escapeQueryWithParameters(
+    "SELECT UPPER(`p`.`name`) AS `upper_name` FROM `products` `p` WHERE `p`.`price` >= 1.25 AND UPPER(`p`.`name`) LIKE UPPER(:name) -- HAVING ignored\nAND `p`.`name` <> 'UPPER(:not_bound)'",
+    { name: 'book%' },
+  );
+  assert.match(sql, />=\s*1\.25/);
+  assert.match(sql, /<>\s*'UPPER\(:not_bound\)'/);
+  assert.match(sql, /-- HAVING ignored\n/);
+  assert.deepEqual(params, ['book%']);
+  for (const predicate of [
+    '`tags` @> :tags',
+    '`tags` <@ :tags',
+    '`tags` && :tags',
+    '`id` = ANY(:tags)',
+  ]) {
+    assert.throws(
+      () =>
+        driver.escapeQueryWithParameters('SELECT FROM `item` WHERE ' + predicate, { tags: ['x'] }),
+      /not supported/,
+    );
+  }
+});
+
 test('constructs a real TypeORM DataSource without loading another database client', () => {
   const { DataSource } = require('typeorm');
   const source = new ArcadeDataSource(options);
