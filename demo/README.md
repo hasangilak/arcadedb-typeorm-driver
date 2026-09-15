@@ -9,7 +9,7 @@ npm run demo -- legacy   # first four migrations, then legacy fixture data
 npm run demo -- up       # remaining migrations, transforming existing records
 npm run demo -- seed     # final schema fixtures, inside a transaction
 npm run demo -- seed     # repeat: same IDs and counts
-npm run demo -- queries  # run all 100 examples against the seeded schema
+npm run demo -- queries  # run all 106 examples against the seeded schema
 npm run demo -- status   # { pending: false }
 npm run demo -- down     # undo the most recent migration
 ```
@@ -18,12 +18,12 @@ The demo uses `driver_demo` by default. Set `ARCADEDB_DATABASE`, `ARCADEDB_URL`,
 
 ## Query examples: easy to sophisticated
 
-The **100 runnable TypeScript examples** are exported from [queries.ts](queries.ts). Each is an independent function accepting an initialized `ArcadeDataSource`. Run migrations and seed first; the queries command does not automatically migrate or seed. The [compatibility matrix](QUERY_SUPPORT.md) maps the examples to TypeORM API families and records unsupported features.
+The **106 runnable TypeScript examples** are exported from [queries.ts](queries.ts). Each is an independent function accepting an initialized `ArcadeDataSource`. Run migrations and seed first; the queries command does not automatically migrate or seed. The [compatibility matrix](QUERY_SUPPORT.md) maps the examples to TypeORM API families and records unsupported features.
 
 ```sh
 npm run demo -- up
 npm run demo -- seed
-npm run demo -- queries                  # all 100 examples, labelled JSON output
+npm run demo -- queries                  # all 106 examples, labelled JSON output
 npm run demo -- queries totalsByOrder    # one named example
 npm run demo -- queries graphPattern
 npm run test:queries                     # exact-result tests against a running Docker database

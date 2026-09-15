@@ -1,4 +1,4 @@
-// Independent expected results for examples 22–100, using the deterministic demo seeds.
+// Independent expected results for examples 22–106, using the deterministic demo seeds.
 module.exports = {
   findByEquality: ['ada'],
   findOneOptions: 'grace',
@@ -88,4 +88,10 @@ module.exports = {
     { account_id: 'grace', orders: 1 },
   ],
   nativeUnwind: [{ tag: 'database' }, { tag: 'graph' }, { tag: 'learning' }],
+  upsertInsert: { id: 'first', title: 'inserted', version: 1 },
+  upsertConflict: { count: 1, title: 'after', version: 2 },
+  upsertBatch: { ids: ['one', 'two'], titles: ['updated', 'inserted'] },
+  upsertRollback: 'original',
+  updateReturning: { affected: 1, id: 'one', title: 'after' },
+  softDeleteReturning: { affected: 1, deleted: true, visible: 0 },
 };

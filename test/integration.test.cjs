@@ -337,3 +337,168 @@ test('UPDATE returning hydrates entity changes, projects columns and reports aff
   );
   assert.equal((await repo.findOneByOrFail({ id: 'one' })).count, 90);
 });
+
+test('native upsert preserves identity, handles conflicts, rolls back batches and returns hydrated results', async (t) => {
+  const Item = new EntitySchema({
+    name: 'UpsertItem',
+    tableName: 'test_upsert_item',
+    columns: {
+      id: { type: 'uuid', primary: true, generated: 'uuid' },
+      tenant: { type: String },
+      slug: { name: 'natural_key', type: String },
+      title: { type: String },
+      note: { type: String, nullable: true },
+      status: { type: String, default: 'draft' },
+      encoded: {
+        type: String,
+        nullable: true,
+        transformer: {
+          to: (v) => (v == null ? v : 'stored:' + v),
+          from: (v) => (v == null ? v : v.replace(/^stored:/, '')),
+        },
+      },
+      createdAt: { type: Date, createDate: true },
+      updatedAt: { type: Date, updateDate: true },
+      version: { type: Number, version: true },
+    },
+    uniques: [{ name: 'uq_upsert_tenant_slug', columns: ['tenant', 'slug'] }],
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Item] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Item);
+  await repo.clear();
+  const paths = ['tenant', 'slug'];
+  const first = await repo.upsert(
+    { tenant: 'a', slug: 'one', title: 'first', encoded: 'secret' },
+    paths,
+  );
+  assert.match(first.identifiers[0].id, /^[\da-f-]{36}$/);
+  assert.equal(first.generatedMaps[0].encoded, 'secret');
+  assert.ok(first.generatedMaps[0].createdAt instanceof Date);
+  assert.equal(first.generatedMaps[0].version, 1);
+  assert.equal(first.generatedMaps[0].status, 'draft');
+  const initial = await repo.findOneByOrFail({ id: first.identifiers[0].id });
+  const second = await repo.upsert(
+    { tenant: 'a', slug: 'one', title: 'second' },
+    { conflictPaths: { tenant: true, slug: true } },
+  );
+  assert.deepEqual(second.identifiers, first.identifiers);
+  assert.equal(second.raw[0].title, 'second');
+  assert.equal(second.generatedMaps[0].version, 2);
+  assert.equal(second.generatedMaps[0].encoded, 'secret');
+  assert.equal(second.generatedMaps[0].createdAt.getTime(), initial.createdAt.getTime());
+  assert.equal(await repo.count(), 1);
+  // Non-overwritten nullable values must remain null, not be filled with incoming values.
+  await repo
+    .createQueryBuilder()
+    .insert()
+    .values({ tenant: 'a', slug: 'one', title: 'third', note: 'ignored' })
+    .orUpdate(['title'], ['tenant', 'natural_key'])
+    .execute();
+  assert.equal((await repo.findOneByOrFail({ id: initial.id })).note, null);
+  const batch = await repo.upsert(
+    [
+      { tenant: 'a', slug: 'one', title: 'batch update' },
+      { tenant: 'b', slug: 'one', title: 'batch insert' },
+    ],
+    paths,
+  );
+  assert.equal(batch.identifiers.length, 2);
+  assert.equal(batch.identifiers[0].id, initial.id);
+  assert.equal(await repo.count(), 2);
+  await assert.rejects(
+    repo.upsert(
+      [
+        { tenant: 'a', slug: 'one', title: 'must rollback' },
+        { tenant: 'c', slug: 'one', title: null },
+      ],
+      paths,
+    ),
+    /null/i,
+  );
+  assert.equal((await repo.findOneByOrFail({ id: initial.id })).title, 'batch update');
+  await assert.rejects(
+    db.transaction(async (manager) => {
+      await manager.upsert(
+        Item,
+        { tenant: 'a', slug: 'one', title: 'transaction rollback' },
+        paths,
+      );
+      await manager.upsert(Item, { tenant: 'd', slug: 'one', title: 'also rollback' }, paths);
+      throw new Error('undo upsert');
+    }),
+    /undo upsert/,
+  );
+  assert.equal((await repo.findOneByOrFail({ id: initial.id })).title, 'batch update');
+  assert.equal(await repo.count(), 2);
+  // The second row fails at the server's primary-key index, after the first write.
+  await assert.rejects(
+    repo.upsert(
+      [
+        { tenant: 'a', slug: 'one', title: 'rollback after actual write' },
+        { id: initial.id, tenant: 'collision', slug: 'new', title: 'duplicate primary key' },
+      ],
+      paths,
+    ),
+    /duplicat/i,
+  );
+  assert.equal((await repo.findOneByOrFail({ id: initial.id })).title, 'batch update');
+  assert.equal(await repo.count(), 2);
+  const concurrent = await Promise.allSettled(
+    Array.from({ length: 6 }, (_, i) =>
+      repo.upsert({ tenant: 'race', slug: 'same', title: 'writer ' + i }, paths),
+    ),
+  );
+  assert.ok(concurrent.some((r) => r.status === 'fulfilled'));
+  for (const result of concurrent) {
+    if (result.status === 'rejected') {
+      assert.ok(result.reason instanceof QueryFailedError);
+      assert.match(result.reason.message, /concurrent|duplicat|retry|lock|conflict/i);
+    }
+  }
+  assert.equal(await repo.countBy({ tenant: 'race', slug: 'same' }), 1);
+  const raced = await repo.findOneByOrFail({ tenant: 'race', slug: 'same' });
+  for (const result of concurrent.filter((result) => result.status === 'fulfilled'))
+    assert.equal(result.value.identifiers[0].id, raced.id);
+  const updates = await Promise.allSettled(
+    Array.from({ length: 6 }, (_, i) =>
+      repo.upsert({ tenant: 'race', slug: 'same', title: 'update ' + i }, paths),
+    ),
+  );
+  for (const result of updates.filter((result) => result.status === 'rejected')) {
+    assert.ok(result.reason instanceof QueryFailedError);
+    assert.match(result.reason.message, /concurrent|duplicat|retry|lock|conflict/i);
+  }
+  assert.equal(
+    (await repo.findOneByOrFail({ id: raced.id })).version,
+    raced.version + updates.filter((result) => result.status === 'fulfilled').length,
+  );
+
+  for (const invalid of [
+    () => repo.upsert({ tenant: 'a', title: 'missing' }, paths),
+    () => repo.upsert({ tenant: 'a', slug: null, title: 'null' }, paths),
+    () => repo.upsert({ tenant: 'a', slug: 'one', title: 'unindexed' }, ['title']),
+    () =>
+      repo.upsert(
+        { tenant: 'a', slug: 'one', title: 'partial' },
+        { conflictPaths: paths, indexPredicate: 'tenant IS NOT NULL' },
+      ),
+    () =>
+      repo.upsert(
+        { tenant: 'a', slug: 'one', title: 'skip' },
+        { conflictPaths: paths, skipUpdateIfNoValuesChanged: true },
+      ),
+  ])
+    await assert.rejects(invalid, /upsert|conflict|unique/i);
+  assert.equal((await repo.findOneByOrFail({ id: initial.id })).title, 'batch update');
+  const runner = db.createQueryRunner();
+  try {
+    await runner.dropUniqueConstraint('test_upsert_item', 'uq_upsert_tenant_slug');
+    await assert.rejects(
+      repo.upsert({ tenant: 'a', slug: 'one', title: 'no installed index' }, paths),
+      /installed unique index/,
+    );
+  } finally {
+    await runner.release();
+  }
+});

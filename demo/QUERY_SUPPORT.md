@@ -1,6 +1,6 @@
 # TypeORM query coverage
 
-Compatibility target: **TypeORM 1.1.1 / ArcadeDB 26.9.1**. There are exactly **100 working named examples**. Rejection tests are additional and do not count toward 100. This is broad coverage of the driver's supported query APIs, not a claim that every TypeORM feature or every combination works on ArcadeDB.
+Compatibility target: **TypeORM 1.1.1 / ArcadeDB 26.9.1**. There are exactly **106 working named examples**. Rejection tests are additional and do not count toward 106. This is broad coverage of the driver's supported query APIs, not a claim that every TypeORM feature or every combination works on ArcadeDB.
 
 ```sh
 docker compose up -d --wait arcadedb
@@ -12,7 +12,7 @@ npm run demo -- queries softRemove
 npm run test:docker
 ```
 
-## Where the 100 examples live
+## Where the 106 examples live
 
 | Numbers | Count | Source                                         | Coverage                                                                                                   |
 | ------- | ----- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -21,6 +21,7 @@ npm run test:docker
 | 47–71   | 25    | [queries-builder.ts](queries-builder.ts)       | Query-builder predicates, parameters, cloning, result modes, grouping/HAVING, manager/repository SQL       |
 | 72–92   | 21    | [queries-writes.ts](queries-writes.ts)         | Save/insert/update/delete, batches, preload, counters, soft deletion/restoration, rollback                 |
 | 93–100  | 8     | [queries-native.ts](queries-native.ts)         | Named/tagged parameters, query runners, isolation levels, reverse graph traversal, edge counts, UNWIND     |
+| 101–106 | 6     | [queries-upsert.ts](queries-upsert.ts)         | Upsert insert/conflict/batch/rollback and update/soft-delete returning                                     |
 
 Every exported function is independently callable as `queries.exampleName(dataSource)`. The CLI prints each name and its JSON result. Examples use fixed fixture values so their results can be compared exactly in tests; replace these values with application inputs while retaining parameter binding.
 
@@ -55,7 +56,7 @@ Every exported function is independently callable as `queries.exampleName(dataSo
 | General `whereExists` / correlated EXISTS                                                 | Not supported. Repository existence and `getExists()` have a dedicated translation; this does not implement general correlated SQL EXISTS.                               |
 | CTEs                                                                                      | Rejected; use native subqueries where supported.                                                                                                                         |
 | PostgreSQL `ArrayContains`, `ArrayContainedBy`, `ArrayOverlap`, `JsonContains`, `Any`     | PostgreSQL-specific operators are rejected; use bound native predicates such as `CONTAINS` and document-property filters.                                                |
-| `upsert`, `orUpdate`, `orIgnore`                                                          | Rejected. Plain insert/save/update are supported; save is not an atomic conflict-upsert.                                                                                 |
+| `orIgnore` and advanced upsert options                                                    | Conflict-ignore, conditional/partial-index upserts and skip-unchanged options are rejected. Basic upsert/orUpdate with installed unique keys are supported.              |
 | `returning` / `output`                                                                    | Update, soft-delete and restore support `*` or mapped property arrays. Insert/delete remain rejected.                                                                    |
 | Streaming                                                                                 | Rejected. Use bounded pages.                                                                                                                                             |
 | Query caching                                                                             | Rejected both in DataSource options and query options.                                                                                                                   |
@@ -69,10 +70,23 @@ These limitations mean **the driver does not support all possible TypeORM querie
 
 ## Verification and cleanup
 
-`test/queries.test.cjs` requires 100 distinct names and checks each result against independent expected values. It also tests compound HAVING filters, unsupported API rejection, CLI selection and the full 100-query CLI run. Before/after snapshots verify that seeded documents, graph records and schema types are unchanged.
+`test/queries.test.cjs` requires 106 distinct names and checks each result against independent expected values. It also tests compound HAVING filters, unsupported API rejection, CLI selection and the full 106-query CLI run. Before/after snapshots verify that seeded documents, graph records and schema types are unchanged.
 
 The 21 additional write examples use [query-scratch.ts](query-scratch.ts) to create an isolated temporary type with generated UUIDs, defaults, a version column and soft-delete metadata. Each type is dropped in `finally`. Running those examples requires schema-write permissions. The original atomic-recalculation example rolls back its fixture changes; the temporary-account example inserts and deletes its record in the same committed transaction.
 
 The full Docker suite also exercises migration rollback/replay, schema mutation, constraints, raw parameter handling, transaction isolation and TypeScript consumer declarations. Passing examples are regression evidence for these concrete queries, not proof of arbitrary SQL compatibility.
 
 References: [TypeORM repository API](https://typeorm.io/docs/working-with-entity-manager/repository-api/), [find options](https://typeorm.io/docs/working-with-entity-manager/find-options/), [query builder](https://typeorm.io/docs/query-builder/select-query-builder/).
+
+## Native write extensions (101–106)
+
+| Example               | Verified result                                                             |
+| --------------------- | --------------------------------------------------------------------------- |
+| `upsertInsert`        | Insert by an assigned primary key; version 1 and returned values            |
+| `upsertConflict`      | Update the same key; one record and version 2                               |
+| `upsertBatch`         | Update an existing record and insert another, preserving input result order |
+| `upsertRollback`      | Manager upsert participates in transaction rollback                         |
+| `updateReturning`     | Return selected properties and affected-row count                           |
+| `softDeleteReturning` | Return the deletion timestamp and hide the record from normal reads         |
+
+The integration suite additionally covers composite unique keys, physical index validation, stable generated UUIDs, defaults and transformers, database-enforced batch rollback, simultaneous inserts/updates, and update/restore result hydration. Concurrent database conflicts are surfaced; no automatic retry is performed.

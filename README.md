@@ -2,7 +2,7 @@
 
 A TypeScript driver connecting TypeORM repositories, query builders and migrations to ArcadeDB’s native HTTP API. Uses Node’s built-in `fetch`; no separate database client is required.
 
-**This is a partial TypeORM implementation.** The demo contains 100 verified queries, 24 reversible migrations and five seeders. That coverage does not mean every TypeORM API or combination of options works. See [unsupported driver features](#unsupported-driver-features) and [known-issues-and-coverage-gaps](#known-issues-and-coverage-gaps) before choosing it for an application.
+**This is a partial TypeORM implementation.** The demo contains 106 verified queries, 24 reversible migrations and five seeders. That coverage does not mean every TypeORM API or combination of options works. See [unsupported driver features](#unsupported-driver-features) and [known-issues-and-coverage-gaps](#known-issues-and-coverage-gaps) before choosing it for an application.
 
 | Component | Supported/tested version                                      |
 | --------- | ------------------------------------------------------------- |
@@ -48,7 +48,7 @@ npm run demo -- down                 # revert the last migration; may delete dat
 
 The query cookbook includes reads and writes. Write examples create and drop temporary document types, so the demo user needs schema permissions. Seeders can be run repeatedly; the migration suite verifies this. The `legacy` command creates and seeds the first four migrations to exercise later data upgrades.
 
-See the [demo guide](demo/README.md) for migration and seeder details, and the [query compatibility matrix](demo/QUERY_SUPPORT.md) for all 100 examples and expected API coverage.
+See the [demo guide](demo/README.md) for migration and seeder details, and the [query compatibility matrix](demo/QUERY_SUPPORT.md) for all 106 examples and expected API coverage.
 
 ## Install and use in an application
 
@@ -156,7 +156,7 @@ Use HTTPS for remote connections. Options inherited from TypeORM are not a promi
 | Migrations                    | Ordered execution, history, pending checks, revert, fake execution/revert and supported transaction modes                                       |
 | Native SQL                    | Parameterized document queries, graph operations and database-specific commands through `query()` / `sql`                                       |
 
-The [100-query matrix](demo/QUERY_SUPPORT.md) identifies specific tested operations. These categories do not imply support for every overload, relation or option.
+The [106-query matrix](demo/QUERY_SUPPORT.md) identifies specific tested operations. These categories do not imply support for every overload, relation or option.
 
 ### Column mappings
 
@@ -215,6 +215,23 @@ const groups = await db
 ```
 
 Aggregate expressions used by `HAVING` must also be selected with aliases. The driver filters an outer query over the grouped results. This path is tested with raw results, not arbitrary entity hydration or nested expressions.
+
+### Upsert by a unique key
+
+```ts
+const result = await db
+  .getRepository(Person)
+  .upsert({ id: 'person-ada', name: 'Ada', age: 38 }, ['id']);
+console.log(result.identifiers, result.generatedMaps, result.raw);
+```
+
+Repository and entity-manager `upsert()` translate to native `UPDATE ... UPSERT RETURN AFTER`. Conflict paths are entity property names, supplied as an array or `conflictPaths` object; composite keys work. The driver checks for an **installed unique index matching exactly those columns**. Conflict values must be supplied, non-null scalars. Keep the index installed throughout the operation.
+
+Insert builders also support `.orUpdate(overwriteColumns, conflictColumns)`, using **database column names**. Entity metadata is required. Generated UUIDs and creation dates survive conflicts; omitted fields remain unchanged on updates, new records receive schema defaults, and automatic version/update-date columns advance. Results contain identifiers, hydrated generated maps and native returned records. A separate `.returning()` on an upsert is not supported; its raw result already contains full records.
+
+Batch upserts execute one statement per input row, in order, within a transaction. A failed batch rolls back when the driver owns that transaction. Inside a caller-owned transaction, propagate failures and let the caller roll back. Single-row upserts use the native atomic operation; concurrent conflicts may still raise database errors, and the driver does not retry them automatically.
+
+Unsupported upsert options are rejected: `skipUpdateIfNoValuesChanged: true`, index predicates, overwrite conditions, named conflict constraints, alternative upsert types and insert-from-select. Batch SQL cannot be represented by one `getQuery()` result; use `execute()`. See [runnable upsert/returning examples](demo/queries-upsert.ts).
 
 ### Returned update records
 
@@ -334,16 +351,16 @@ These describe the database or its SQL model, separately from missing driver imp
 | Documented `ALTER PROPERTY` changes attributes; it does not expose SQL-style property name/type replacement | This driver uses add/backfill/drop migrations for those changes. See [property alteration](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).                                                                                                                                  |
 | Native `DROP PROPERTY` removes the schema definition but leaves record values                               | The driver’s `dropColumn()` additionally removes values to implement column-drop semantics. See [property removal](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).                                                                                                          |
 
-### Features ArcadeDB has that this driver does not expose through TypeORM
+### Native capabilities and their TypeORM integration
 
-| Native capability                                            | Current driver boundary                                                                                                                                                                                           |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SQL `UPDATE ... UPSERT` and `RETURN BEFORE` / `RETURN AFTER` | TypeORM `upsert()` and conflict clauses are unsupported; update `returning()` is supported. Use reviewed native SQL where appropriate. See [UPDATE](https://docs.arcadedb.com/arcadedb/reference/sql/sql-update). |
-| Links, vertices and edges                                    | Native SQL examples work; ORM relations, cascades and graph entity mapping are missing. See [database basics](https://docs.arcadedb.com/arcadedb/concepts/basics).                                                |
-| Specialized indexes, including full-text and vector indexes  | The schema adapter covers ordinary and unique indexes. Specialized indexes need native commands and their own version-specific tests. See [indexes](https://docs.arcadedb.com/arcadedb/concepts/indexes).         |
-| More native property types and constraints                   | Only the mappings listed above are implemented; unsupported mappings are not evidence that ArcadeDB lacks the type. See [properties](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).            |
-| Multiple HTTP query languages                                | This driver submits `sql`; it has no language selector for Cypher, Gremlin or other server languages. See [HTTP API](https://docs.arcadedb.com/arcadedb/reference/http-api/http).                                 |
-| Bucket partitioning and HA replication                       | No automatic shard routing, topology discovery or replica routing; see below.                                                                                                                                     |
+| Native capability                                            | Current driver boundary                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SQL `UPDATE ... UPSERT` and `RETURN BEFORE` / `RETURN AFTER` | TypeORM `upsert()` / `orUpdate()` and update `returning()` are supported within the documented restrictions; native `RETURN BEFORE` requires raw SQL. Use reviewed native SQL where appropriate. See [UPDATE](https://docs.arcadedb.com/arcadedb/reference/sql/sql-update). |
+| Links, vertices and edges                                    | Native SQL examples work; ORM relations, cascades and graph entity mapping are missing. See [database basics](https://docs.arcadedb.com/arcadedb/concepts/basics).                                                                                                          |
+| Specialized indexes, including full-text and vector indexes  | The schema adapter covers ordinary and unique indexes. Specialized indexes need native commands and their own version-specific tests. See [indexes](https://docs.arcadedb.com/arcadedb/concepts/indexes).                                                                   |
+| More native property types and constraints                   | Only the mappings listed above are implemented; unsupported mappings are not evidence that ArcadeDB lacks the type. See [properties](https://docs.arcadedb.com/arcadedb/reference/sql/sql-properties).                                                                      |
+| Multiple HTTP query languages                                | This driver submits `sql`; it has no language selector for Cypher, Gremlin or other server languages. See [HTTP API](https://docs.arcadedb.com/arcadedb/reference/http-api/http).                                                                                           |
+| Bucket partitioning and HA replication                       | No automatic shard routing, topology discovery or replica routing; see below.                                                                                                                                                                                               |
 
 The pinned server also needs dialect adaptations for the TypeORM existence wrapper, case-conversion expressions and aggregate filtering. Those implemented translations do not make arbitrary SQL from another database portable.
 
@@ -353,7 +370,7 @@ The following are **driver limitations**, not blanket claims about ArcadeDB:
 
 - ORM relations, relation query builders, relation cascades/eager loading, tree repositories and graph entity mapping.
 - Relational joins, aliased ORM subqueries, general correlated `EXISTS` and common table expressions.
-- TypeORM upserts, `orUpdate()` and `orIgnore()`. Insert/delete `returning()` and `output()` remain unsupported; update, soft-delete and restore support them.
+- `orIgnore()`, conditional/partial-index upserts, named conflict constraints and skipping unchanged upserts. Insert/delete `returning()` and `output()` remain unsupported; update, soft-delete and restore support them.
 - PostgreSQL-style `ArrayContains`, `ArrayContainedBy`, `ArrayOverlap`, `JsonContains` and `Any` operators. Use native SQL for supported database equivalents.
 - Query caching, result streaming, pessimistic/dirty-read locks, `NOWAIT` / `SKIP LOCKED`, `distinctOn()`, index hints and SQL execution-time hints. `requestTimeout` is a client request limit, not a server-side query hint.
 - Auto-increment/identity generation, SQL schemas, views, foreign-key/check/exclusion schema APIs and specialized index metadata.
@@ -376,7 +393,7 @@ Query-builder guards are preserved across write/select switches and clones. Quer
 - `simple-json`, `simple-array` and transformer chains beyond the basic transformer case.
 - Stock TypeORM CLI workflows, clustered operation, failover and sharding.
 
-Treat these as unverified, not as supported merely because the method is available in TypeScript. The 100-query demo exercises concrete cases; it is not a complete TypeORM conformance suite.
+Treat these as unverified, not as supported merely because the method is available in TypeScript. The 106-query demo exercises concrete cases; it is not a complete TypeORM conformance suite.
 
 ## Partitioning, sharding and replication
 
@@ -398,7 +415,7 @@ npm run test:types        # compile the TypeScript consumer fixture
 npm run test:docker       # build and all tests against a disposable Docker server
 ```
 
-The latest full Docker run passed **178 tests, including subtests**. It includes assertions for the 100 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
+The latest full Docker run passed **188 tests, including subtests**. It includes assertions for the 106 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
 
 `test:docker` starts a dedicated Compose project, waits for database readiness and removes its containers and volumes even on failure. It also builds the driver/demo and checks types, ESLint and formatting. Stop any other server using port 2480 before running it.
 

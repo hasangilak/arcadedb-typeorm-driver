@@ -32,7 +32,7 @@ export class ArcadeDriver implements Driver {
     'READ COMMITTED',
     'REPEATABLE READ',
   ];
-  readonly supportedUpsertTypes = [];
+  readonly supportedUpsertTypes = ['on-conflict-do-update' as const];
   readonly dataTypeDefaults = {};
   readonly spatialTypes = [];
   readonly withLengthColumnTypes = [];

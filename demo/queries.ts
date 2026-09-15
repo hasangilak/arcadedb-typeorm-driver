@@ -1,3 +1,4 @@
+import { upsertQueries } from './queries-upsert';
 import { randomUUID } from 'node:crypto';
 import { Between, Brackets, In, Like } from 'typeorm';
 import type { ArcadeDataSource } from '../src';
@@ -251,4 +252,5 @@ export const queries = {
   ...builderQueries,
   ...writeQueries,
   ...nativeQueries,
+  ...upsertQueries,
 };

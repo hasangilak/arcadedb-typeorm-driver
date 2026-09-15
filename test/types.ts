@@ -28,3 +28,12 @@ const options: ArcadeDataSourceOptions = {
 const db: DataSource = new ArcadeDataSource(options);
 const people: Promise<DecoratedPerson[]> = db.getRepository(DecoratedPerson).find();
 void people;
+
+void db.getRepository(schema).upsert({ id: 'person', name: 'Ada' }, ['id']);
+void db.createQueryBuilder().update(schema).set({ name: 'Ada' }).returning(['id', 'name']);
+const switchedPeople: Promise<DecoratedPerson[]> = db
+  .createQueryBuilder(schema, 'p')
+  .update()
+  .select('p')
+  .getMany();
+void switchedPeople;
