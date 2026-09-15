@@ -1,6 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const runNode = promisify(execFile);
 
 test('query cookbook: basic reads through aggregates, graph traversal and transactional writes', async (t) => {
   const { queries } = require('../.demo-dist/demo/queries');
@@ -82,4 +85,18 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
   assert.deepEqual(await queries.atomicRecalculation(db), expected.atomicRecalculation);
   assert.deepEqual(await queries.insertUpdateDelete(db), expected.insertUpdateDelete);
   assert.deepEqual(await snapshot(), before);
+  await t.test('CLI selects a named query and rejects unknown names', async () => {
+    const { stdout } = await runNode(
+      process.execPath,
+      ['.demo-dist/demo/run.js', 'queries', 'graphPattern'],
+      {
+        env: { ...process.env, ARCADEDB_DATABASE: database },
+      },
+    );
+    assert.deepEqual(JSON.parse(stdout), { query: 'graphPattern', result: expected.graphPattern });
+    await assert.rejects(
+      runNode(process.execPath, ['.demo-dist/demo/run.js', 'queries', 'missing-query']),
+      /Unknown query/,
+    );
+  });
 });

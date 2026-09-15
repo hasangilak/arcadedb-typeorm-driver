@@ -107,6 +107,8 @@ TypeORM has no public external driver registry. `ArcadeDataSource` bootstraps it
 
 ## Migrations and seeders
 
+For runnable examples progressing from repository reads to aggregates, pagination, JSON/array filters, native graph traversal and transactional writes, see the [21-query cookbook](demo/README.md#query-examples-easy-to-sophisticated). After migrating and seeding, run `npm run demo -- queries` or select an example such as `npm run demo -- queries graphPattern`.
+
 Pass ordinary TypeORM `MigrationInterface` classes in `migrations`, then call `runMigrations()`, `showMigrations()` or `undoLastMigration()`. `migrationsRun`, custom history table names, fake execution/revert, and transaction modes are supported.
 
 Schema migrations default to `transaction: 'none'`: ArcadeDB DDL is not transactional. Data-only migrations can use `all` or `each`. A schema migration failure can leave partial changes without a history entry; inspect and repair those changes before retrying. Run one migration process per database at a time, using a deployment lock when necessary.
@@ -145,6 +147,7 @@ npm run format:check
 npm test                  # build and unit tests
 npm run test:types        # compile consumer code against exported declarations
 npm run test:migrations   # migration suite against a running Docker database
+npm run test:queries      # query cookbook against a running Docker database
 npm run test:docker       # build and all tests in Docker against ArcadeDB
 ```
 

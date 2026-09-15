@@ -13,6 +13,7 @@
     "build:demo": "tsc -p tsconfig.demo.json",
     "demo": "npm run build:demo && node .demo-dist/demo/run.js",
     "test:migrations": "npm run build && npm run build:demo && node --test test/migrations.test.cjs",
+    "test:queries": "npm run build:demo && node --test test/queries.test.cjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

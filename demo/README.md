@@ -9,11 +9,55 @@ npm run demo -- legacy   # first four migrations, then legacy fixture data
 npm run demo -- up       # remaining migrations, transforming existing records
 npm run demo -- seed     # final schema fixtures, inside a transaction
 npm run demo -- seed     # repeat: same IDs and counts
+npm run demo -- queries  # run all 21 examples against the seeded schema
 npm run demo -- status   # { pending: false }
 npm run demo -- down     # undo the most recent migration
 ```
 
 The demo uses `driver_demo` by default. Set `ARCADEDB_DATABASE`, `ARCADEDB_URL`, `ARCADEDB_USERNAME` and `ARCADEDB_PASSWORD` to override it. Use a fresh database for `legacy`; final-schema seeders require all 24 migrations. `down` reverts one migration per invocation. Reversing table creation intentionally deletes its data. `legacy` creates fixtures only for the first four migrations and should not be run against the final schema.
+
+## Query examples: easy to sophisticated
+
+The runnable TypeScript examples live in [queries.ts](queries.ts). Each is an independent function accepting an initialized `ArcadeDataSource`. Run migrations and seed first; the queries command does not automatically migrate or seed.
+
+```sh
+npm run demo -- up
+npm run demo -- seed
+npm run demo -- queries                  # all 21 examples, labelled JSON output
+npm run demo -- queries totalsByOrder    # one named example
+npm run demo -- queries graphPattern
+npm run test:queries                     # exact-result tests against a running Docker database
+```
+
+| Level        | Example               | Technique and seeded result                                                                                         |
+| ------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Basic        | `findAccount`         | `findOneByOrFail`: Ada's account                                                                                    |
+| Basic        | `activeAccounts`      | Boolean filter and sorting: Ada and Grace                                                                           |
+| Basic        | `priceRange`          | `Between`: book and support priced 2500–8000 cents                                                                  |
+| Basic        | `selectedProducts`    | `In`: book and course                                                                                               |
+| Basic        | `countPendingOrders`  | `countBy`: one pending order                                                                                        |
+| Basic        | `accountProjection`   | Select only ID and display name                                                                                     |
+| Intermediate | `nestedConditions`    | `Brackets`, AND/OR and spread parameters                                                                            |
+| Intermediate | `offsetPage`          | `skip`/`take` and total count: support, three products total                                                        |
+| Intermediate | `cursorPage`          | Seek after `(price_cents, id)`: support, then course                                                                |
+| Intermediate | `nameSearch`          | Bound `Like` prefix: Database Handbook                                                                              |
+| Intermediate | `salesSummary`        | Raw SUM projections: three units, 17000 cents                                                                       |
+| Intermediate | `totalsByOrder`       | GROUP BY and calculated totals: 12000 and 5000 cents                                                                |
+| Intermediate | `dateWindow`          | Date range with UTC conversion                                                                                      |
+| Intermediate | `distinctStatuses`    | DISTINCT projection: paid and pending                                                                               |
+| Advanced     | `nestedDocuments`     | Native nested JSON filter and projection: book, 320 pages                                                           |
+| Advanced     | `arrayMembership`     | Tagged SQL with `CONTAINS`: book tagged learning                                                                    |
+| Advanced     | `highValueOrders`     | Native subquery: Grace's order above the spending threshold                                                         |
+| Advanced     | `customerOrders`      | Traverse outgoing edges and expand order vertices                                                                   |
+| Advanced     | `graphPattern`        | Native SQL MATCH returning properties from connected vertices                                                       |
+| Writes       | `atomicRecalculation` | Update quantity and aggregate total using one transaction manager; preview three units / 7500 cents, then roll back |
+| Writes       | `insertUpdateDelete`  | Insert, update and delete a temporary account within a committed transaction                                        |
+
+`getMany()` and repository reads return hydrated entities. Aggregate projections use `getRawOne()` / `getRawMany()`; native graph queries return raw ArcadeDB objects with record IDs. Graph MATCH, nested document filters and subqueries use `db.query()` or `db.sql` with bound values. These examples do not require ORM joins or graph entity mappings, which the driver does not support.
+
+Both pagination examples include ID as a tie-breaker. Cursor pagination uses the preceding row's price and ID rather than an offset. The fixed cursors, dates and filters in this cookbook match the deterministic seed data; adapt them to application inputs. `Like` patterns retain SQL wildcard semantics.
+
+The query suite checks exact results for all examples, snapshots all seeded document and graph records before/after, and repeats the write examples to verify rollback and cleanup. The runner supports selecting one example by name. See ArcadeDB's [SQL SELECT](https://docs.arcadedb.com/arcadedb/reference/sql/sql-select) and [SQL MATCH](https://docs.arcadedb.com/arcadedb/reference/sql/sql-match) references for the native expressions; these examples are tested on the pinned 26.9.1 image.
 
 ## Migration sequence
 
