@@ -6,6 +6,7 @@ import {
   DeleteQueryBuilder,
   QueryBuilder,
   type ObjectLiteral,
+  type QueryRunner,
 } from 'typeorm';
 
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
@@ -69,7 +70,20 @@ class ArcadeUpdateQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
 }
 class ArcadeDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   DeleteQueryBuilder,
-)<Entity> {}
+)<Entity> {
+  override returning(columns: string | string[]): this {
+    validateReturning(this, columns);
+    return super.returning(columns);
+  }
+  protected override createDeleteExpression(): string {
+    return `DELETE FROM ${this.getTableName(this.getMainTableName())}${this.expressionMap.returning?.length ? ' RETURN BEFORE' : ''}${this.createWhereExpression()}`;
+  }
+  override async execute() {
+    const result = await super.execute();
+    result.raw = projectReturnedRows(this, result.raw);
+    return result;
+  }
+}
 class ArcadeSoftDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   SoftDeleteQueryBuilder,
 )<Entity> {
@@ -89,7 +103,20 @@ function validateReturning(builder: QueryBuilder<any>, columns: string | string[
     !metadata ||
     columns.some((name) => !metadata.findColumnsWithPropertyPath(name).length)
   )
-    throw new Error('ArcadeDB returning requires * or an array of mapped entity property names');
+    throw new Error(
+      'ArcadeDB returning expressions are not supported; use * or an array of mapped entity property names',
+    );
+}
+
+function projectReturnedRows(builder: QueryBuilder<any>, rows: ObjectLiteral[]): ObjectLiteral[] {
+  const returning = builder.expressionMap.returning;
+  if (!Array.isArray(returning) || !returning.length) return rows;
+  const columns = returning.flatMap((name) =>
+    builder.expressionMap.mainAlias!.metadata.findColumnsWithPropertyPath(name),
+  );
+  return rows.map((row) =>
+    Object.fromEntries(columns.map((column) => [column.databaseName, row[column.databaseName]])),
+  );
 }
 
 /** Reject options TypeORM otherwise silently ignores for an external driver. */
@@ -122,9 +149,18 @@ export class ArcadeSelectQueryBuilder<Entity extends ObjectLiteral> extends with
 class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
   InsertQueryBuilder,
 )<Entity> {
+  override returning(columns: string | string[]): this {
+    validateReturning(this, columns);
+    return super.returning(columns);
+  }
   override getQuery(): string {
-    if (this.expressionMap.onIgnore)
-      throw new Error('Insert conflict-ignore is not supported by ArcadeDB');
+    if (
+      this.expressionMap.onIgnore &&
+      (this.expressionMap.onUpdate || this.expressionMap.insertFromSelect)
+    )
+      throw new Error(
+        'Combining conflict-ignore with upsert or insert-from-select is not supported',
+      );
     return super.getQuery();
   }
 
@@ -164,7 +200,12 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
   }
 
   protected override createInsertExpression(): string {
-    if (!this.expressionMap.onUpdate) return super.createInsertExpression();
+    if (!this.expressionMap.onUpdate)
+      return (
+        super
+          .createInsertExpression()
+          .replace(/ ON CONFLICT DO NOTHING\s*$/, ' ON DUPLICATE KEY SKIP') + ' RETURN @this'
+      );
     const { metadata, columns, overwrite } = this.upsertColumns();
     const values = this.getValueSets();
     if (values.length !== 1)
@@ -217,15 +258,19 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
   }
 
   override async execute(): Promise<InsertResult> {
-    if (!this.expressionMap.onUpdate) return super.execute();
-    const { columns } = this.upsertColumns();
+    if (!this.expressionMap.onUpdate && !this.expressionMap.onIgnore) {
+      const result = await super.execute();
+      result.raw = projectReturnedRows(this, result.raw);
+      return result;
+    }
+    const columns = this.expressionMap.onUpdate ? this.upsertColumns().columns : undefined;
     const values = this.getValueSets();
     if (!values.length) return new InsertResult();
     const runner = this.obtainQueryRunner();
     let started = false;
     try {
       // Check the installed schema, not just decorator claims about uniqueness.
-      const table = await runner.getTable(this.getMainTableName());
+      const table = columns ? await runner.getTable(this.getMainTableName()) : undefined;
       const uniqueKeys = table
         ? [
             table.primaryColumns.map((column) => column.name),
@@ -234,6 +279,7 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
           ]
         : [];
       if (
+        columns &&
         !uniqueKeys.some(
           (key) =>
             key.length === columns.length &&
@@ -247,9 +293,11 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
         await runner.startTransaction();
         started = true;
       }
-      const result = new InsertResult();
-      result.raw = [];
-      for (const value of values) {
+      const result = this.expressionMap.onIgnore
+        ? await this.executeIgnoringDuplicates(runner)
+        : new InsertResult();
+      result.raw ??= [];
+      for (const value of this.expressionMap.onIgnore ? [] : values) {
         const single = this.clone()
           .setQueryRunner(runner)
           .values(value as QueryDeepPartialEntity<Entity>);
@@ -259,6 +307,7 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
         result.generatedMaps.push(...next.generatedMaps);
       }
       if (started) await runner.commitTransaction();
+      result.raw = projectReturnedRows(this, result.raw);
       return result;
     } catch (error) {
       if (started && runner.isTransactionActive) {
@@ -272,6 +321,33 @@ class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeS
     } finally {
       if (runner !== this.queryRunner) await runner.release();
     }
+  }
+
+  private async executeIgnoringDuplicates(runner: QueryRunner): Promise<InsertResult> {
+    const values = this.getValueSets();
+    const metadata = this.expressionMap.mainAlias?.hasMetadata
+      ? this.expressionMap.mainAlias.metadata
+      : undefined;
+    if (this.expressionMap.callListeners && metadata)
+      for (const value of values)
+        await runner.broadcaster.broadcast('BeforeInsert', metadata, value);
+    const [sql, parameters] = this.getQueryAndParameters();
+    const queryResult = await runner.query(sql, parameters, true);
+    const result = new InsertResult();
+    result.raw = [];
+    for (const [index, row] of queryResult.records.entries()) {
+      if (row['@skipped'] === true) continue;
+      result.raw.push(row);
+      if (metadata && this.expressionMap.updateEntity) {
+        const generated = this.dataSource.driver.createGeneratedMap(metadata, row) ?? {};
+        runner.manager.merge(metadata.target, values[index], generated);
+        result.generatedMaps.push(generated);
+        result.identifiers.push(metadata.getEntityIdMap(values[index]) ?? {});
+      }
+      if (this.expressionMap.callListeners && metadata)
+        await runner.broadcaster.broadcast('AfterInsert', metadata, values[index]);
+    }
+    return result;
   }
 
   private executeSingleUpsert(): Promise<InsertResult> {

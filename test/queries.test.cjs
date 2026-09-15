@@ -128,13 +128,14 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
           )
           .getMany(),
       stream: () => qb().stream(),
-      returning: () => qb().delete().where({ id: 'ada' }).returning('*').execute(),
+      returning: () => qb().delete().where({ id: 'ada' }).returning('COUNT(*)').execute(),
       upsertOption: () =>
         repo.upsert(
           { id: 'ada', active: true },
           { conflictPaths: ['id'], skipUpdateIfNoValuesChanged: true },
         ),
-      ignore: () => qb().insert().values({ id: 'ada' }).orIgnore().execute(),
+      ignore: () =>
+        qb().insert().values({ id: 'ada' }).orIgnore().orUpdate(['id'], ['id']).execute(),
       cache: () => repo.find({ cache: true }),
       lock: () => qb().setLock('pessimistic_read').getRawMany(),
       cte: () => qb().addCommonTableExpression('SELECT 1', 'numbers').getRawMany(),

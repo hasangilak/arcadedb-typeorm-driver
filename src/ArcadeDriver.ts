@@ -275,7 +275,7 @@ export class ArcadeDriver implements Driver {
     return this;
   }
   isReturningSqlSupported(returningType: string): boolean {
-    return returningType === 'update';
+    return ['insert', 'update', 'delete'].includes(returningType);
   }
   isUUIDGenerationSupported(): boolean {
     return false;

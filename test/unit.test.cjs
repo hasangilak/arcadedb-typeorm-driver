@@ -17,7 +17,13 @@ test('unsupported query options reject instead of silently changing semantics', 
     dirtyRead: () => select().setLock('dirty_read'),
     cte: () => select().addCommonTableExpression('SELECT 1', 'numbers'),
     ignoreConflicts: () =>
-      db.createQueryBuilder().insert().into('demo_accounts').values({ id: 'x' }).orIgnore(),
+      db
+        .createQueryBuilder()
+        .insert()
+        .into('demo_accounts')
+        .values({ id: 'x' })
+        .orIgnore()
+        .orUpdate(['id'], ['id']),
   };
   for (const [name, create] of Object.entries(cases)) {
     await t.test(name, () => assert.throws(() => create().getQuery(), /not supported/i));
@@ -223,7 +229,14 @@ test('query guards survive every builder switch and clone without changing TypeO
       for (const switched of [switchBuilder(start()), switchBuilder(start()).clone()]) {
         assert.throws(() => switched.select('id').distinctOn(['id']).getQuery(), /not supported/i);
         assert.throws(
-          () => switched.insert().into('documents').values({ id: 'x' }).orIgnore().getQuery(),
+          () =>
+            switched
+              .insert()
+              .into('documents')
+              .values({ id: 'x' })
+              .orIgnore()
+              .orUpdate(['id'], ['id'])
+              .getQuery(),
           /not supported/i,
         );
       }

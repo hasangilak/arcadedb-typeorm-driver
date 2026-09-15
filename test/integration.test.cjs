@@ -502,3 +502,111 @@ test('native upsert preserves identity, handles conflicts, rolls back batches an
     await runner.release();
   }
 });
+
+test('insert/delete returning and duplicate ignore preserve result identity and atomicity', async (t) => {
+  const Item = new EntitySchema({
+    name: 'InsertReturns',
+    tableName: 'test_insert_returns',
+    columns: {
+      id: { type: 'uuid', primary: true, generated: 'uuid' },
+      slug: { type: String, unique: true },
+      title: { name: 'stored_title', type: String },
+      count: { type: Number, default: 99 },
+      createdAt: { type: Date, createDate: true },
+    },
+  });
+  const db = await new ArcadeDataSource({ ...options, entities: [Item] }).initialize();
+  t.after(() => db.destroy());
+  const repo = db.getRepository(Item);
+  await repo.clear();
+  const inserted = await repo
+    .createQueryBuilder()
+    .insert()
+    .values({ slug: 'one', title: 'first' })
+    .returning(['title'])
+    .execute();
+  assert.deepEqual(inserted.raw, [{ stored_title: 'first' }]);
+  assert.match(inserted.identifiers[0].id, /^[\da-f-]{36}$/);
+  assert.equal(inserted.generatedMaps[0].count, 99);
+  assert.ok(inserted.generatedMaps[0].createdAt instanceof Date);
+  const events = [];
+  db.subscribers.push({
+    afterInsert(event) {
+      events.push(event.entity.slug);
+    },
+  });
+  const ignored = await repo
+    .createQueryBuilder()
+    .insert()
+    .values([
+      { slug: 'one', title: 'skip first' },
+      { slug: 'two', title: 'insert second' },
+      { slug: 'two', title: 'skip third' },
+      { slug: 'three', title: 'insert fourth' },
+    ])
+    .orIgnore()
+    .returning('*')
+    .execute();
+  assert.deepEqual(
+    ignored.raw.map((row) => row.slug),
+    ['two', 'three'],
+  );
+  assert.deepEqual(events, ['two', 'three']);
+  assert.equal(ignored.identifiers.length, 2);
+  assert.equal(ignored.generatedMaps.length, 2);
+  for (let i = 0; i < 2; i++) assert.equal(ignored.identifiers[i].id, ignored.raw[i].id);
+  assert.equal((await repo.findOneByOrFail({ slug: 'one' })).title, 'first');
+  const allSkipped = await repo
+    .createQueryBuilder()
+    .insert()
+    .values({ slug: 'one', title: 'skip' })
+    .orIgnore()
+    .execute();
+  assert.deepEqual(allSkipped.raw, []);
+  assert.deepEqual(allSkipped.identifiers, []);
+  await assert.rejects(
+    repo
+      .createQueryBuilder()
+      .insert()
+      .values([
+        { slug: 'rollback', title: 'rollback' },
+        { slug: 'invalid', title: null },
+      ])
+      .orIgnore()
+      .execute(),
+    /null/i,
+  );
+  assert.equal(await repo.countBy({ slug: 'rollback' }), 0);
+  await assert.rejects(
+    db.transaction(async (manager) => {
+      const removed = await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Item)
+        .where({ slug: 'two' })
+        .output(['title', 'count'])
+        .execute();
+      assert.equal(removed.affected, 1);
+      assert.deepEqual(removed.raw, [{ stored_title: 'insert second', count: 99 }]);
+      throw new Error('restore deletion');
+    }),
+    /restore deletion/,
+  );
+  assert.equal(await repo.count(), 3);
+  const deleted = await repo
+    .createQueryBuilder()
+    .delete()
+    .where('slug IN (:...slugs)', { slugs: ['two', 'three'] })
+    .returning('*')
+    .execute();
+  assert.equal(deleted.affected, 2);
+  assert.equal(deleted.raw.length, 2);
+  const absent = await repo
+    .createQueryBuilder()
+    .delete()
+    .where({ slug: 'absent' })
+    .returning(['id'])
+    .execute();
+  assert.equal(absent.affected, 0);
+  assert.deepEqual(absent.raw, []);
+});

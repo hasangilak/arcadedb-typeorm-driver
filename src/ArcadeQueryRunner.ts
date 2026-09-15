@@ -142,7 +142,8 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
         result.affected = updateReturnsRecords(query)
           ? body.result.length
           : Number(body.result[0]?.count ?? 0);
-      else if (/^\s*INSERT\b/i.test(statement)) result.affected = body.result.length;
+      else if (/^\s*INSERT\b/i.test(statement))
+        result.affected = body.result.filter((row: any) => row['@skipped'] !== true).length;
       const elapsed = Date.now() - started;
       if (
         this.dataSource.options.maxQueryExecutionTime &&

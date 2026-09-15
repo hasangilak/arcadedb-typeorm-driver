@@ -191,7 +191,7 @@ export function updateReturnsRecords(sql: string): boolean {
   const words = statementWords(sql);
   const returning = words.findIndex((word) => word.word === 'RETURN');
   return (
-    words[0]?.word === 'UPDATE' &&
+    ['UPDATE', 'DELETE'].includes(words[0]?.word) &&
     returning >= 0 &&
     ['BEFORE', 'AFTER'].includes(words[returning + 1]?.word)
   );
