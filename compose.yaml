@@ -1,6 +1,8 @@
 services:
   arcadedb:
     image: arcadedata/arcadedb:26.9.1
+    mem_limit: 1g
+    cpus: 2
     environment:
       JAVA_OPTS: >-
         -Darcadedb.server.rootPassword=integration-password
@@ -8,7 +10,7 @@ services:
     ports:
       - "127.0.0.1:2480:2480"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:2480/api/v1/ready"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2480/api/v1/ready"]
       interval: 2s
       timeout: 5s
       retries: 60
