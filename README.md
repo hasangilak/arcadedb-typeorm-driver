@@ -52,18 +52,55 @@ See the [demo guide](demo/README.md) for migration and seeder details, and the [
 
 ## Install and use in an application
 
-Build a local package from this repository:
+The package is private (`private: true` prevents npm publication). Install a tarball or a pinned Git revision. Both CommonJS `require()` and ESM `import` work, and TypeScript declarations are included. Applications need Node.js 22+ and TypeORM **1.1.1**; an existing TypeORM 0.3 application must migrate before using this driver.
+
+### Option 1: private tarball
+
+In this repository:
 
 ```sh
 npm ci
 npm pack
 ```
 
-`npm pack` builds the driver and produces `arcadedb-typeorm-driver-0.1.0.tgz`. In your application, install that tarball and the pinned peers:
+This produces `arcadedb-typeorm-driver-0.1.0.tgz` with compiled JavaScript, declarations, source maps, README and license. In the other project:
 
 ```sh
 npm install /absolute/path/arcadedb-typeorm-driver-0.1.0.tgz typeorm@1.1.1 reflect-metadata@^0.2.2
 ```
+
+For a team or CI, copy the tarball into that project's `vendor/` directory and commit it with its lockfile, or distribute it through your private artifact storage:
+
+```sh
+npm install ./vendor/arcadedb-typeorm-driver-0.1.0.tgz typeorm@1.1.1 reflect-metadata@^0.2.2
+```
+
+The installed tarball runs without a TypeScript compiler or build scripts. Rebuild and reinstall the tarball when updating the driver; use a new package version for a new distributed release.
+
+### Option 2: pinned Git dependency
+
+Once the desired commit is pushed to your private repository, replace `<commit-sha>` with its full hash:
+
+```sh
+npm install 'git+ssh://git@github.com/hasangilak/arcadedb-typeorm-driver.git#<commit-sha>' typeorm@1.1.1 reflect-metadata@^0.2.2
+```
+
+Git and repository access must be available to the installing machine. npm builds the source through `prepare`; Git installs therefore need build dependencies and lifecycle scripts enabled. Keep the commit pinned and commit the consuming project's lockfile. Tarball installs avoid this build step. See [npm lifecycle documentation](https://docs.npmjs.com/cli/v11/using-npm/scripts/).
+
+For another project on the same machine, a local Git revision is also supported:
+
+```sh
+npm install 'git+file:///absolute/path/to/arcadedb-typeorm-driver#<commit-sha>'
+```
+
+### Import and connect
+
+```js
+// CommonJS
+const { ArcadeDataSource } = require('arcadedb-typeorm-driver');
+```
+
+The TypeScript/ESM example below uses the same public package entry point. Import from `arcadedb-typeorm-driver`, rather than internal `dist/` paths.
 
 This example creates a document type, saves a record and reads it back. Set `ARCADEDB_PASSWORD` before running it.
 
@@ -415,9 +452,9 @@ npm run test:types        # compile the TypeScript consumer fixture
 npm run test:docker       # build and all tests against a disposable Docker server
 ```
 
-The latest full Docker run passed **188 tests, including subtests**. It includes assertions for the 106 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
+The latest full Docker run passed **189 tests, including subtests**. It includes assertions for the 106 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
 
-`test:docker` starts a dedicated Compose project, waits for database readiness and removes its containers and volumes even on failure. It also builds the driver/demo and checks types, ESLint and formatting. Stop any other server using port 2480 before running it.
+`test:docker` starts a dedicated Compose project, waits for database readiness and removes its containers and volumes even on failure. It also builds the driver/demo, checks types, ESLint and formatting, and installs the private package into isolated consumer apps through both tarball and pinned Git dependencies. Consumer tests verify CommonJS/ESM imports, TypeScript declarations, CRUD, upserts, returning results and rollback against Docker. The packaging test needs Git and access to npm dependencies. Stop any other server using port 2480 before running it.
 
 For local iteration against a running Docker database:
 
@@ -426,6 +463,7 @@ docker compose up -d --wait arcadedb
 npm run test:integration
 npm run test:migrations
 npm run test:queries
+npm run test:package       # install tarball and Git revision in isolated consumer apps
 docker compose down --volumes # removes this local Compose database data
 ```
 

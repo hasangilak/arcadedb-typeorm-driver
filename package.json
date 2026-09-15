@@ -8,7 +8,6 @@
     "test": "npm run build && node --test test/unit.test.cjs",
     "test:integration": "npm run build && node --test test/integration.test.cjs",
     "test:docker": "node scripts/test-docker.cjs",
-    "prepack": "npm run build",
     "test:types": "tsc --strict --noEmit --module Node16 --target ES2022 --experimentalDecorators --emitDecoratorMetadata --skipLibCheck test/types.ts",
     "build:demo": "tsc -p tsconfig.demo.json",
     "demo": "npm run build:demo && node .demo-dist/demo/run.js",
@@ -18,10 +17,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "hooks:install": "node scripts/install-hooks.cjs",
-    "prepare": "node scripts/install-hooks.cjs"
+    "prepare": "npm run build && npm run hooks:install",
+    "test:package": "node --test test/package.test.cjs"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "typeorm",
+    "arcadedb",
+    "typescript",
+    "database",
+    "driver"
+  ],
   "license": "ISC",
   "type": "commonjs",
   "peerDependencies": {
@@ -45,5 +50,22 @@
   ],
   "engines": {
     "node": ">=22"
-  }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hasangilak/arcadedb-typeorm-driver.git"
+  },
+  "homepage": "https://github.com/hasangilak/arcadedb-typeorm-driver#readme",
+  "bugs": {
+    "url": "https://github.com/hasangilak/arcadedb-typeorm-driver/issues"
+  },
+  "private": true
 }
