@@ -63,12 +63,26 @@ test('find operators, query builder, pagination and raw bound SQL', async (t) =>
   const [page, count] = await repo.findAndCount({ order: { age: 'ASC' }, skip: 1, take: 1 });
   assert.equal(count, 3);
   assert.equal(page[0].name, 'Carol');
-  const people = await repo.createQueryBuilder('p').where('p.age > :age', { age: 25 }).orderBy('p.age', 'DESC').getMany();
-  assert.deepEqual(people.map(p => p.name), ['Alice', 'Carol']);
+  const people = await repo
+    .createQueryBuilder('p')
+    .where('p.age > :age', { age: 25 })
+    .orderBy('p.age', 'DESC')
+    .getMany();
+  assert.deepEqual(
+    people.map((p) => p.name),
+    ['Alice', 'Carol'],
+  );
   const rows = await source.query('SELECT name FROM test_person WHERE name = :p0', ['Alice']);
   assert.equal(rows[0].name, 'Alice');
-  assert.equal((await source.query('SELECT name FROM test_person WHERE name = :name', { name: 'Bob' }))[0].name, 'Bob');
-  assert.equal((await source.sql`SELECT name FROM test_person WHERE name = ${'Carol'}`)[0].name, 'Carol');
+  assert.equal(
+    (await source.query('SELECT name FROM test_person WHERE name = :name', { name: 'Bob' }))[0]
+      .name,
+    'Bob',
+  );
+  assert.equal(
+    (await source.sql`SELECT name FROM test_person WHERE name = ${'Carol'}`)[0].name,
+    'Carol',
+  );
   await assert.rejects(source.query('SELECT FROM definitely_missing_type'), QueryFailedError);
 });
 
@@ -77,13 +91,16 @@ test('transaction commit, rollback, session isolation and runner release', async
   t.after(() => source.destroy());
   const repo = source.getRepository(Person);
   await repo.clear();
-  await source.transaction(async manager => {
+  await source.transaction(async (manager) => {
     await manager.save(Person, { name: 'Committed', age: 1, active: true });
   });
-  await assert.rejects(source.transaction(async manager => {
-    await manager.save(Person, { name: 'Rolled back', age: 2, active: true });
-    throw new Error('rollback me');
-  }), /rollback me/);
+  await assert.rejects(
+    source.transaction(async (manager) => {
+      await manager.save(Person, { name: 'Rolled back', age: 2, active: true });
+      throw new Error('rollback me');
+    }),
+    /rollback me/,
+  );
   assert.equal(await repo.count(), 1);
   const runner = source.createQueryRunner();
   await runner.startTransaction('REPEATABLE READ');
@@ -94,12 +111,16 @@ test('transaction commit, rollback, session isolation and runner release', async
   await runner.release();
   assert.equal(await repo.count(), 1);
   await assert.rejects(runner.query('SELECT 1'), /released/i);
-  await assert.rejects(source.transaction('SERIALIZABLE', async () => {}), /isolation/i);
+  await assert.rejects(
+    source.transaction('SERIALIZABLE', async () => {}),
+    /isolation/i,
+  );
 });
 
 test('schema defaults, uniqueness, nullability, JSON, dates, transformers and additive sync', async (t) => {
   const Document = new EntitySchema({
-    name: 'Document', tableName: 'test_document',
+    name: 'Document',
+    tableName: 'test_document',
     columns: {
       id: { type: 'uuid', primary: true, generated: 'uuid' },
       slug: { type: String, unique: true },
@@ -110,7 +131,13 @@ test('schema defaults, uniqueness, nullability, JSON, dates, transformers and ad
       data: { type: 'json' },
       tags: { type: 'array' },
       date: { type: Date },
-      encoded: { type: String, transformer: { to: value => value == null ? value : 'stored:' + value, from: value => value == null ? value : value.replace(/^stored:/, '') } },
+      encoded: {
+        type: String,
+        transformer: {
+          to: (value) => (value == null ? value : 'stored:' + value),
+          from: (value) => (value == null ? value : value.replace(/^stored:/, '')),
+        },
+      },
     },
     indices: [{ name: 'idx_test_document_score', columns: ['score'] }],
   });
@@ -131,17 +158,21 @@ test('schema defaults, uniqueness, nullability, JSON, dates, transformers and ad
   assert.equal(loaded.date.toISOString(), date.toISOString());
   assert.equal(loaded.encoded, 'secret');
   await assert.rejects(repo.insert({ ...doc, id: undefined }), /duplicat/i);
-  await assert.rejects(repo.insert({ ...doc, id: undefined, slug: 'second', title: null }), /null/i);
+  await assert.rejects(
+    repo.insert({ ...doc, id: undefined, slug: 'second', title: null }),
+    /null/i,
+  );
   await source.synchronize();
   assert.equal(await repo.count(), 1);
   assert.equal((await source.driver.createSchemaBuilder().log()).upQueries.length, 0);
   const indexes = await source.query('SELECT FROM schema:indexes');
-  assert.ok(indexes.some(index => index.name === 'idx_test_document_score'));
+  assert.ok(indexes.some((index) => index.name === 'idx_test_document_score'));
 });
 
 test('automatic timestamps, versions, soft deletion and restoration', async (t) => {
   const Audit = new EntitySchema({
-    name: 'Audit', tableName: 'test_audit',
+    name: 'Audit',
+    tableName: 'test_audit',
     columns: {
       id: { type: 'uuid', primary: true, generated: 'uuid' },
       name: { type: String },
@@ -186,7 +217,10 @@ test('independent concurrent transactions and rollback on data source destructio
     await source.destroy(); // rolls back second
     assert.ok(first.isReleased && second.isReleased);
     await source.initialize();
-    assert.deepEqual((await repo.find()).map(p => p.name), ['first']);
+    assert.deepEqual(
+      (await repo.find()).map((p) => p.name),
+      ['first'],
+    );
   } finally {
     if (source.isInitialized) await source.destroy();
   }

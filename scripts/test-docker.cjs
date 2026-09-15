@@ -1,7 +1,9 @@
 const { spawnSync } = require('node:child_process');
 
 function compose(args) {
-  const result = spawnSync('docker', ['compose', '-p', 'arcadedb-typeorm-test', ...args], { stdio: 'inherit' });
+  const result = spawnSync('docker', ['compose', '-p', 'arcadedb-typeorm-test', ...args], {
+    stdio: 'inherit',
+  });
   if (result.error) console.error(result.error.message);
   return result.status ?? 1;
 }

@@ -8,9 +8,9 @@ services:
         -Darcadedb.server.rootPassword=integration-password
         -Darcadedb.server.defaultDatabases=driver_test[root]
     ports:
-      - "127.0.0.1:2480:2480"
+      - '127.0.0.1:2480:2480'
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2480/api/v1/ready"]
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:2480/api/v1/ready']
       interval: 2s
       timeout: 5s
       retries: 60

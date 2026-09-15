@@ -19,7 +19,10 @@ const schema = new EntitySchema<DecoratedPerson>({
 });
 
 const options: ArcadeDataSourceOptions = {
-  type: 'arcadedb', database: 'app', username: 'root', password: 'example',
+  type: 'arcadedb',
+  database: 'app',
+  username: 'root',
+  password: 'example',
   entities: [DecoratedPerson, schema],
 };
 const db: DataSource = new ArcadeDataSource(options);

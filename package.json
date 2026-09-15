@@ -9,7 +9,15 @@
     "test:integration": "npm run build && node --test test/integration.test.cjs",
     "test:docker": "node scripts/test-docker.cjs",
     "prepack": "npm run build",
-    "test:types": "tsc --strict --noEmit --module Node16 --target ES2022 --experimentalDecorators --emitDecoratorMetadata --skipLibCheck test/types.ts"
+    "test:types": "tsc --strict --noEmit --module Node16 --target ES2022 --experimentalDecorators --emitDecoratorMetadata --skipLibCheck test/types.ts",
+    "build:demo": "tsc -p tsconfig.demo.json",
+    "demo": "npm run build:demo && node .demo-dist/demo/run.js",
+    "test:migrations": "npm run build && npm run build:demo && node --test test/migrations.test.cjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "hooks:install": "node scripts/install-hooks.cjs",
+    "prepare": "node scripts/install-hooks.cjs"
   },
   "keywords": [],
   "author": "",
@@ -20,13 +28,19 @@
     "typeorm": "1.1.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.4",
-    "typescript": "^5.9.3"
+    "eslint": "^10.10.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0"
   },
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "scripts/install-hooks.cjs"
   ],
   "engines": {
     "node": ">=22"
