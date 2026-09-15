@@ -75,6 +75,7 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
     return result;
   };
   const before = await snapshot();
+  const schemaBefore = await db.query('SELECT name FROM schema:types ORDER BY name');
   for (const [name, run] of Object.entries(queries)) {
     await t.test(name, async () => assert.deepEqual(await run(db), expected[name]));
   }
@@ -87,6 +88,58 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
   assert.deepEqual(await queries.atomicRecalculation(db), expected.atomicRecalculation);
   assert.deepEqual(await queries.insertUpdateDelete(db), expected.insertUpdateDelete);
   assert.deepEqual(await snapshot(), before);
+  assert.deepEqual(await db.query('SELECT name FROM schema:types ORDER BY name'), schemaBefore);
+  await t.test(
+    'HAVING combines projected aggregates, decimals, ordering and pagination',
+    async () => {
+      const { itemSchema } = require('../.demo-dist/demo/seeders/04-orders');
+      const result = await db
+        .getRepository(itemSchema)
+        .createQueryBuilder('i')
+        .select('i.order_id', 'order_id')
+        .addSelect('sum(i.quantity * i.unit_price)', 'total')
+        .groupBy('i.order_id')
+        .having('sum(i.quantity * i.unit_price) >= :min', { min: 5000 })
+        .andHaving('sum(i.quantity * i.unit_price) < 12000.5')
+        .orderBy('i.order_id')
+        .skip(1)
+        .take(1)
+        .getRawMany();
+      assert.deepEqual(result, [{ order_id: 'legacy-order', total: 5000 }]);
+    },
+  );
+  await t.test('TypeORM query compatibility boundaries reject unsupported features', async (t) => {
+    const { accountSchema } = require('../.demo-dist/demo/seeders/02-accounts');
+    const { catalogSchema } = require('../.demo-dist/demo/seeders/03-catalog');
+    const { EntityNotFoundError, IsNull } = require('typeorm');
+    const repo = db.getRepository(accountSchema);
+    const qb = () => repo.createQueryBuilder('a');
+    assert.equal(await repo.countBy({ country: IsNull() }), 0);
+    await assert.rejects(repo.findOneByOrFail({ id: 'missing' }), EntityNotFoundError);
+    await assert.rejects(qb().where({ id: 'missing' }).getOneOrFail(), EntityNotFoundError);
+    const cases = {
+      join: () => qb().leftJoin(catalogSchema, 'p', 'p.id = a.id').getMany(),
+      subquery: () =>
+        qb()
+          .where(
+            'a.id IN (' +
+              db.getRepository(catalogSchema).createQueryBuilder('p').select('p.id').getQuery() +
+              ')',
+          )
+          .getMany(),
+      stream: () => qb().stream(),
+      returning: () =>
+        qb().update().set({ active: true }).where({ id: 'ada' }).returning('*').execute(),
+      upsert: () => repo.upsert({ id: 'ada', active: true }, ['id']),
+      ignore: () => qb().insert().values({ id: 'ada' }).orIgnore().execute(),
+      cache: () => repo.find({ cache: true }),
+      lock: () => qb().setLock('pessimistic_read').getRawMany(),
+      cte: () => qb().addCommonTableExpression('SELECT 1', 'numbers').getRawMany(),
+    };
+    for (const [name, run] of Object.entries(cases)) {
+      await t.test(name, () => assert.rejects(async () => run(), /not supported|only supported/i));
+    }
+  });
   await t.test('CLI selects a named query and rejects unknown names', async () => {
     const { stdout } = await runNode(
       process.execPath,
@@ -100,5 +153,11 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
       runNode(process.execPath, ['.demo-dist/demo/run.js', 'queries', 'missing-query']),
       /Unknown query/,
     );
+    const all = await runNode(process.execPath, ['.demo-dist/demo/run.js', 'queries'], {
+      env: { ...process.env, ARCADEDB_DATABASE: database },
+    });
+    assert.equal((all.stdout.match(/"query":/g) ?? []).length, 100);
+    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual(await db.query('SELECT name FROM schema:types ORDER BY name'), schemaBefore);
   });
 });

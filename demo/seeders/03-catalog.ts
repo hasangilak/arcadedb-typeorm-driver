@@ -1,6 +1,12 @@
 import { EntitySchema, type EntityManager } from 'typeorm';
 
-export const catalogSchema = new EntitySchema({
+export const catalogSchema = new EntitySchema<{
+  id: string;
+  name: string;
+  price_cents: number;
+  attributes: Record<string, unknown>;
+  tags: string[];
+}>({
   name: 'SeedProduct',
   tableName: 'demo_catalog',
   columns: {

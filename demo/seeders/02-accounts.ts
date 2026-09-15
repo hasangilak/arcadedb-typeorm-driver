@@ -1,6 +1,12 @@
 import { EntitySchema, type EntityManager } from 'typeorm';
 
-const Account = new EntitySchema({
+const Account = new EntitySchema<{
+  id: string;
+  display_name: string;
+  email: string;
+  country: string | null;
+  active: boolean;
+}>({
   name: 'SeedAccount',
   tableName: 'demo_accounts',
   columns: {

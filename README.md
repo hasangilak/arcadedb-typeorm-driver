@@ -107,7 +107,7 @@ TypeORM has no public external driver registry. `ArcadeDataSource` bootstraps it
 
 ## Migrations and seeders
 
-For runnable examples progressing from repository reads to aggregates, pagination, JSON/array filters, native graph traversal and transactional writes, see the [21-query cookbook](demo/README.md#query-examples-easy-to-sophisticated). After migrating and seeding, run `npm run demo -- queries` or select an example such as `npm run demo -- queries graphPattern`.
+For **100 runnable examples** progressing from repository reads to aggregates, pagination, JSON/array filters, native graph traversal and transactional writes, see the [query cookbook](demo/README.md#query-examples-easy-to-sophisticated) and [TypeORM compatibility matrix](demo/QUERY_SUPPORT.md). After migrating and seeding, run `npm run demo -- queries` or select an example such as `npm run demo -- queries graphPattern`.
 
 Pass ordinary TypeORM `MigrationInterface` classes in `migrations`, then call `runMigrations()`, `showMigrations()` or `undoLastMigration()`. `migrationsRun`, custom history table names, fake execution/revert, and transaction modes are supported.
 

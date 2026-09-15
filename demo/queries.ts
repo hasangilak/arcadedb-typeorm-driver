@@ -4,6 +4,10 @@ import type { ArcadeDataSource } from '../src';
 import { accountSchema } from './seeders/02-accounts';
 import { catalogSchema } from './seeders/03-catalog';
 import { itemSchema, orderSchema, totalSchema } from './seeders/04-orders';
+import { repositoryQueries } from './queries-repository';
+import { builderQueries } from './queries-builder';
+import { writeQueries } from './queries-writes';
+import { nativeQueries } from './queries-native';
 
 /** Run after all demo migrations and seeders. Each function can be called independently. */
 export const queries = {
@@ -243,4 +247,8 @@ export const queries = {
       };
     });
   },
+  ...repositoryQueries,
+  ...builderQueries,
+  ...writeQueries,
+  ...nativeQueries,
 };
