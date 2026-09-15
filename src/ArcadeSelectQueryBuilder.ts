@@ -1,9 +1,74 @@
-import { InsertQueryBuilder, SelectQueryBuilder, type ObjectLiteral } from 'typeorm';
+import {
+  InsertQueryBuilder,
+  SelectQueryBuilder,
+  UpdateQueryBuilder,
+  DeleteQueryBuilder,
+  QueryBuilder,
+  type ObjectLiteral,
+} from 'typeorm';
+
+import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
+
+// TypeORM's global registry creates base builders when switching query kinds.
+// Keep those transitions local to this driver; clones retain their constructor.
+function withArcadeSwitches<T extends new (...args: any[]) => QueryBuilder<any>>(Base: T): T {
+  return class extends Base {
+    getQuery(): string {
+      return Reflect.apply(Base.prototype.getQuery, this, []);
+    }
+    select(...args: any[]): any {
+      return arcadeBuilder(Reflect.apply(Base.prototype.select, this, args));
+    }
+    insert(): any {
+      return arcadeBuilder(super.insert());
+    }
+    update(...args: any[]): any {
+      return arcadeBuilder(Reflect.apply(Base.prototype.update, this, args));
+    }
+    delete(): any {
+      return arcadeBuilder(super.delete());
+    }
+    softDelete(): any {
+      return arcadeBuilder(super.softDelete());
+    }
+    restore(): any {
+      return arcadeBuilder(super.restore());
+    }
+    relation(..._args: any[]): any {
+      throw new Error('ORM relations are not supported by ArcadeDB');
+    }
+  };
+}
+
+function arcadeBuilder(builder: QueryBuilder<any>): QueryBuilder<any> {
+  const constructors = {
+    select: ArcadeSelectQueryBuilder,
+    insert: ArcadeInsertQueryBuilder,
+    update: ArcadeUpdateQueryBuilder,
+    delete: ArcadeDeleteQueryBuilder,
+    'soft-delete': ArcadeSoftDeleteQueryBuilder,
+    restore: ArcadeSoftDeleteQueryBuilder,
+  };
+  const Constructor = constructors[
+    builder.expressionMap.queryType as keyof typeof constructors
+  ] as new (builder: QueryBuilder<any>) => QueryBuilder<any>;
+  return builder instanceof Constructor ? builder : new Constructor(builder);
+}
+
+class ArcadeUpdateQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
+  UpdateQueryBuilder,
+)<Entity> {}
+class ArcadeDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
+  DeleteQueryBuilder,
+)<Entity> {}
+class ArcadeSoftDeleteQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
+  SoftDeleteQueryBuilder,
+)<Entity> {}
 
 /** Reject options TypeORM otherwise silently ignores for an external driver. */
-export class ArcadeSelectQueryBuilder<
-  Entity extends ObjectLiteral,
-> extends SelectQueryBuilder<Entity> {
+export class ArcadeSelectQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
+  SelectQueryBuilder,
+)<Entity> {
   override timeTravelQuery(_timeTravelFn?: string | boolean): this {
     throw new Error('Time travel queries are not supported by ArcadeDB');
   }
@@ -25,14 +90,11 @@ export class ArcadeSelectQueryBuilder<
     }
     return super.getQuery();
   }
-
-  override insert(): InsertQueryBuilder<Entity> {
-    this.expressionMap.queryType = 'insert';
-    return new ArcadeInsertQueryBuilder(this);
-  }
 }
 
-class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends InsertQueryBuilder<Entity> {
+class ArcadeInsertQueryBuilder<Entity extends ObjectLiteral> extends withArcadeSwitches(
+  InsertQueryBuilder,
+)<Entity> {
   override getQuery(): string {
     if (this.expressionMap.onIgnore || this.expressionMap.onUpdate)
       throw new Error('Insert conflict-ignore and upsert are not supported by ArcadeDB');

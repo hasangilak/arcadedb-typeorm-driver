@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { BaseQueryRunner } from 'typeorm/query-runner/BaseQueryRunner';
 import { QueryResult } from 'typeorm/query-runner/QueryResult';
+import { BroadcasterResult } from 'typeorm/subscriber/BroadcasterResult';
 import { Broadcaster } from 'typeorm/subscriber/Broadcaster';
 import type { IsolationLevel } from 'typeorm/driver/types/IsolationLevel';
 import type { ArcadeDriver } from './ArcadeDriver';
@@ -114,6 +115,8 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
       Array.isArray(parameters) ? parameters : undefined,
       this,
     );
+    await this.broadcaster.broadcast('BeforeQuery', query, parameters);
+    const broadcastResult = new BroadcasterResult();
     const started = Date.now();
     try {
       const params = Array.isArray(parameters)
@@ -149,6 +152,15 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
           this,
         );
       }
+      this.broadcaster.broadcastAfterQueryEvent(
+        broadcastResult,
+        query,
+        parameters,
+        true,
+        elapsed,
+        result.raw,
+        undefined,
+      );
       return useStructuredResult ? result : result.raw;
     } catch (error) {
       this.dataSource.logger.logQueryError(
@@ -157,7 +169,18 @@ export class ArcadeQueryRunner extends BaseQueryRunner implements QueryRunner {
         Array.isArray(parameters) ? parameters : undefined,
         this,
       );
+      this.broadcaster.broadcastAfterQueryEvent(
+        broadcastResult,
+        query,
+        parameters,
+        false,
+        undefined,
+        undefined,
+        error,
+      );
       throw new QueryFailedError(query, parameters, error as Error);
+    } finally {
+      await broadcastResult.wait();
     }
   }
 

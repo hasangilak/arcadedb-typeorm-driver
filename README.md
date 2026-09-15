@@ -140,7 +140,7 @@ Runtime tests primarily use `EntitySchema`. Decorator entities have a compile-ti
 | `migrationsTableName`       | TypeORM migration history name; configurable                                      |
 | `migrationsTransactionMode` | Driver default `'none'`; see migration restrictions below                         |
 
-Use HTTPS for remote connections. Options inherited from TypeORM are not a promise that their behavior is implemented. In particular, query caching is rejected and query subscriber events are missing; see the coverage section.
+Use HTTPS for remote connections. Options inherited from TypeORM are not a promise that their behavior is implemented. In particular, query caching is rejected; see the coverage section for other restrictions. Query subscribers receive awaited `beforeQuery` / `afterQuery` events, including parameters, runner context, results and failures.
 
 ## Supported features and data types
 
@@ -345,14 +345,11 @@ The following are **driver limitations**, not blanket claims about ArcadeDB:
 - Nested transactions/savepoints and isolation levels other than those documented above.
 - Automatic failover, read-replica routing, application shard routing and distributed transactions.
 
-Many unsupported paths throw explicit errors. This is not guaranteed for every possible query-builder chain: see the known guard bypass below.
+Many unsupported paths throw explicit errors. The regression suite checks guards across builder-type switches and clones.
 
 ## Known issues and coverage gaps
 
-**Known implementation issues:**
-
-- Switching builder types can bypass select-query guards. For example, an insert builder switched back with `.select()` can use TypeORM’s base builder; a subsequent unsupported `.distinctOn()` may be silently ignored. Avoid switching builder types and relying on guards to validate arbitrary chains.
-- The query runner does not broadcast `beforeQuery` / `afterQuery` subscriber events. Accepting a `subscribers` option does not mean all subscriber hooks work. Transaction broadcasting is wired but lacks dedicated event tests.
+Query-builder guards are preserved across write/select switches and clones. Query subscriber events are tested for successful and failed requests, including transaction sessions. Transaction lifecycle subscriber hooks still need dedicated event tests.
 
 **Implemented or inherited behavior needing more coverage:**
 
@@ -385,7 +382,7 @@ npm run test:types        # compile the TypeScript consumer fixture
 npm run test:docker       # build and all tests against a disposable Docker server
 ```
 
-The latest full Docker run passed **170 tests, including subtests**. It includes assertions for the 100 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
+The latest full Docker run passed **178 tests, including subtests**. It includes assertions for the 100 query examples, migrations, seed repeatability, transactions and explicitly rejected APIs. This number describes the suite, not the number of supported TypeORM features.
 
 `test:docker` starts a dedicated Compose project, waits for database readiness and removes its containers and volumes even on failure. It also builds the driver/demo and checks types, ESLint and formatting. Stop any other server using port 2480 before running it.
 

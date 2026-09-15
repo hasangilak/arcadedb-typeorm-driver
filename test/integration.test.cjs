@@ -225,3 +225,33 @@ test('independent concurrent transactions and rollback on data source destructio
     if (source.isInitialized) await source.destroy();
   }
 });
+
+test('query subscriber events cover repository operations and transaction sessions', async (t) => {
+  const source = await new ArcadeDataSource(options).initialize();
+  t.after(() => source.destroy());
+  await source.getRepository(Person).clear();
+  const events = [];
+  source.subscribers.push({
+    async beforeQuery(event) {
+      events.push(['before', event]);
+    },
+    async afterQuery(event) {
+      events.push(['after', event]);
+    },
+  });
+  await source.transaction(async (manager) => {
+    await manager.insert(Person, { name: 'event', age: 42, active: true });
+    assert.equal(await manager.count(Person), 1);
+    assert.ok(events.every(([, event]) => event.queryRunner === manager.queryRunner));
+  });
+  assert.ok(events.length >= 4);
+  for (let i = 0; i < events.length; i += 2) {
+    assert.equal(events[i][0], 'before');
+    assert.equal(events[i + 1][0], 'after');
+    assert.equal(events[i][1].query, events[i + 1][1].query);
+    assert.equal(events[i + 1][1].success, true);
+  }
+  await assert.rejects(source.query('SELECT FROM test_missing_events_type'), QueryFailedError);
+  assert.equal(events.at(-1)[1].success, false);
+  assert.ok(events.at(-1)[1].error);
+});

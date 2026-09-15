@@ -206,3 +206,78 @@ test('schema synchronization honors index opt-out', async (t) => {
     false,
   );
 });
+
+test('query guards survive every builder switch and clone without changing TypeORM globally', async (t) => {
+  const { SelectQueryBuilder } = require('typeorm');
+  const db = new ArcadeDataSource(options);
+  const start = () => db.createQueryBuilder().select('id').from('documents', 'd');
+  const switches = {
+    insert: (qb) => qb.insert().into('documents').values({ id: 'x' }),
+    update: (qb) => qb.update('documents').set({ id: 'x' }),
+    delete: (qb) => qb.delete(),
+    softDelete: (qb) => qb.softDelete(),
+    restore: (qb) => qb.restore(),
+  };
+  for (const [name, switchBuilder] of Object.entries(switches)) {
+    await t.test(name, () => {
+      for (const switched of [switchBuilder(start()), switchBuilder(start()).clone()]) {
+        assert.throws(() => switched.select('id').distinctOn(['id']).getQuery(), /not supported/i);
+        assert.throws(
+          () => switched.insert().into('documents').values({ id: 'x' }).orIgnore().getQuery(),
+          /not supported/i,
+        );
+      }
+    });
+  }
+  // A base TypeORM builder remains a base builder: no registry/prototype patch.
+  const base = new SelectQueryBuilder(db).from('documents', 'd');
+  assert.doesNotThrow(() => base.insert().select('id').distinctOn(['id']).getQuery());
+});
+
+test('query subscribers are awaited and receive success, failure, parameters and runner context', async (t) => {
+  const events = [];
+  t.mock.method(global, 'fetch', async (url) => {
+    if (url.includes('/exists/')) return Response.json({ result: true });
+    events.push('request');
+    return Response.json({ result: [{ answer: 42 }] });
+  });
+  const db = await new ArcadeDataSource(options).initialize();
+  t.after(() => db.destroy());
+  db.subscribers.push({
+    async beforeQuery(event) {
+      await Promise.resolve();
+      events.push(['before', event]);
+    },
+    async afterQuery(event) {
+      await Promise.resolve();
+      events.push(['after', event]);
+    },
+  });
+  const runner = db.createQueryRunner();
+  const params = { answer: 42 };
+  assert.deepEqual(await runner.query('SELECT :answer AS answer', params), [{ answer: 42 }]);
+  assert.deepEqual(
+    events.map((e) => (Array.isArray(e) ? e[0] : e)),
+    ['before', 'request', 'after'],
+  );
+  for (const event of [events[0][1], events[2][1]]) {
+    assert.equal(event.query, 'SELECT :answer AS answer');
+    assert.equal(event.parameters, params);
+    assert.equal(event.queryRunner, runner);
+    assert.equal(event.manager, runner.manager);
+    assert.equal(event.dataSource, db);
+  }
+  assert.equal(events[2][1].success, true);
+  assert.ok(events[2][1].executionTime >= 0);
+  assert.deepEqual(events[2][1].rawResults, [{ answer: 42 }]);
+  events.length = 0;
+  t.mock.method(db.driver, 'request', async () => {
+    throw new Error('request failed');
+  });
+  await assert.rejects(runner.query('SELECT :p0', [42]), /request failed/);
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[1][1].parameters, [42]);
+  assert.equal(events[1][1].success, false);
+  assert.equal(events[1][1].error.message, 'request failed');
+  await runner.release();
+});
