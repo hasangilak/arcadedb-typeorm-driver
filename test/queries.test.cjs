@@ -54,7 +54,9 @@ test('query cookbook: basic reads through aggregates, graph traversal and transa
     graphPattern: [{ account_id: 'ada', order_id: 'legacy-order' }],
     atomicRecalculation: { quantity: 3, total_cents: 7500 },
     insertUpdateDelete: { inserted: 1, updated: 1, deleted: 1 },
+    ...require('./query-expectations.cjs'),
   };
+  assert.equal(Object.keys(queries).length, 100, '100 distinct executable query examples');
   assert.deepEqual(Object.keys(queries), Object.keys(expected));
   const snapshot = async () => {
     const result = {};
